@@ -26,6 +26,7 @@ app.add_middleware(
         "https://goalie-app.vercel.app",
         "https://goally.vercel.app",
     ],
+    allow_origin_regex=r"https://goalie-app.*\.vercel\.app|http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
