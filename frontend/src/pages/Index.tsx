@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Clock, Trophy, MessageCircle, X, Medal } from "lucide-react";
+import { agentApi } from "@/services/api";
 import DashboardHeader from "@/components/DashboardHeader";
 import TaskCard from "@/components/TaskCard";
 import SectionHeader from "@/components/SectionHeader";
@@ -124,7 +125,7 @@ const Index = () => {
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
-  const handleSendMessage = useCallback((content: string) => {
+  const handleSendMessage = useCallback(async (content: string) => {
     setMessages((prev) => [
       ...prev,
       {
@@ -137,19 +138,31 @@ const Index = () => {
 
     setIsTyping(true);
 
-    // Simulate agent response
-    setTimeout(() => {
-      setIsTyping(false);
+    try {
+      const response = await agentApi.sendMessage(content);
       setMessages((prev) => [
         ...prev,
         {
           id: `agent-${Date.now()}`,
-          content: "I understand. Let's break this down into smaller steps. Sometimes starting is the hardest part - what's one tiny action you could take right now?",
+          content: response,
           sender: "agent" as const,
           timestamp: new Date(),
         },
       ]);
-    }, 1500);
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agent-${Date.now()}`,
+          content: "Sorry, I'm having trouble connecting. Please try again.",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
   }, []);
 
   return (

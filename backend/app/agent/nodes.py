@@ -1,13 +1,12 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage
-import opik
 
 from app.core.config import settings
 from app.agent.state import AgentState
 
-# Initialize Gemini model with Opik tracing
+# Initialize Gemini model
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     google_api_key=settings.google_api_key
 )
 
@@ -23,7 +22,6 @@ Your role is to:
 Be encouraging, practical, and specific in your advice. Focus on sustainable habits rather than quick fixes."""
 
 
-@opik.track
 async def coach_node(state: AgentState) -> dict:
     """Main coaching node that responds to user messages."""
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]

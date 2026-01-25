@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import traceback
 
 from app.agent.graph import run_agent
 
@@ -21,6 +22,8 @@ async def chat(request: ChatRequest):
         response = await run_agent(request.message)
         return ChatResponse(response=response)
     except Exception as e:
+        print(f"Chat error: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
