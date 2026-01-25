@@ -1,12 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import opik
 
 from app.api.routes import router
 from app.core.config import settings
 
-# Initialize Opik for observability
-opik.configure(api_key=settings.opik_api_key)
+# Initialize Opik for observability (optional)
+if settings.opik_api_key:
+    try:
+        import opik
+        opik.configure(api_key=settings.opik_api_key)
+    except Exception as e:
+        print(f"Opik initialization skipped: {e}")
 
 app = FastAPI(
     title="Goally API",

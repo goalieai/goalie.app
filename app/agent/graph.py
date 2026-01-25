@@ -1,6 +1,5 @@
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
-from opik.integrations.langchain import OpikTracer
 
 from app.agent.state import AgentState
 from app.agent.nodes import coach_node
@@ -20,9 +19,6 @@ workflow.add_edge("coach", END)
 # Compile the graph
 graph = workflow.compile()
 
-# Opik tracer for observability
-opik_tracer = OpikTracer()
-
 
 async def run_agent(message: str) -> str:
     """Run the agent with a user message."""
@@ -31,10 +27,7 @@ async def run_agent(message: str) -> str:
         "user_goal": ""
     }
 
-    result = await graph.ainvoke(
-        initial_state,
-        config={"callbacks": [opik_tracer]}
-    )
+    result = await graph.ainvoke(initial_state)
 
     # Extract the last AI message
     ai_messages = [m for m in result["messages"] if m.type == "ai"]
