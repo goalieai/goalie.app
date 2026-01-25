@@ -1,0 +1,259 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Goalie Design System - ADHD-friendly, calm aesthetic */
+
+@layer base {
+  :root {
+    /* Bright, energizing palette - Orange Psychology */
+    --background: 35 40% 97%;
+    --foreground: 25 20% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 25 20% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 25 20% 15%;
+
+    /* Bright Orange - energizing, motivating, creative */
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Warm cream secondary */
+    --secondary: 35 40% 94%;
+    --secondary-foreground: 25 30% 25%;
+
+    --muted: 35 25% 92%;
+    --muted-foreground: 25 15% 45%;
+
+    /* Light orange accent */
+    --accent: 30 80% 94%;
+    --accent-foreground: 25 70% 35%;
+
+    /* Red-orange for destructive */
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success - warm green */
+    --success: 140 50% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - golden amber */
+    --warning: 45 95% 55%;
+    --warning-foreground: 45 90% 15%;
+
+    --border: 35 30% 85%;
+    --input: 35 30% 85%;
+    --ring: 25 95% 53%;
+
+    --radius: 1rem;
+
+    /* Custom Goalie tokens - Orange theme */
+    --now-bg: 25 60% 96%;
+    --now-border: 25 50% 80%;
+    --next-bg: 35 50% 96%;
+    --next-border: 35 40% 82%;
+    --achieved-bg: 45 50% 95%;
+    --achieved-border: 45 40% 80%;
+    
+    /* Medal gradient - bright and celebratory */
+    --medal-from: 48 96% 53%;
+    --medal-to: 25 95% 53%;
+
+    /* Agent chat */
+    --agent-bg: 30 35% 97%;
+    --agent-bubble: 25 40% 94%;
+    --user-bubble: 0 0% 100%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 25 20% 15%;
+    --sidebar-primary: 25 95% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 25 50% 95%;
+    --sidebar-accent-foreground: 25 70% 35%;
+    --sidebar-border: 35 30% 88%;
+    --sidebar-ring: 25 95% 53%;
+  }
+
+  .dark {
+    --background: 25 15% 10%;
+    --foreground: 35 30% 95%;
+
+    --card: 25 15% 14%;
+    --card-foreground: 35 30% 95%;
+
+    --popover: 25 15% 14%;
+    --popover-foreground: 35 30% 95%;
+
+    --primary: 25 90% 55%;
+    --primary-foreground: 25 20% 10%;
+
+    --secondary: 25 15% 20%;
+    --secondary-foreground: 35 30% 90%;
+
+    --muted: 25 15% 18%;
+    --muted-foreground: 25 10% 60%;
+
+    --accent: 30 30% 25%;
+    --accent-foreground: 30 60% 85%;
+
+    --destructive: 0 60% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 140 40% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 45 85% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 25 15% 22%;
+    --input: 25 15% 22%;
+    --ring: 25 90% 55%;
+
+    --now-bg: 25 20% 15%;
+    --now-border: 25 25% 28%;
+    --next-bg: 30 18% 16%;
+    --next-border: 30 18% 26%;
+    --achieved-bg: 40 18% 15%;
+    --achieved-border: 40 18% 26%;
+    
+    --medal-from: 48 90% 50%;
+    --medal-to: 25 90% 50%;
+
+    --agent-bg: 25 18% 12%;
+    --agent-bubble: 25 25% 20%;
+    --user-bubble: 25 15% 20%;
+
+    --sidebar-background: 25 15% 12%;
+    --sidebar-foreground: 35 30% 95%;
+    --sidebar-primary: 25 90% 55%;
+    --sidebar-primary-foreground: 25 20% 10%;
+    --sidebar-accent: 25 25% 20%;
+    --sidebar-accent-foreground: 30 60% 80%;
+    --sidebar-border: 25 15% 22%;
+    --sidebar-ring: 25 90% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .section-now {
+    @apply bg-[hsl(var(--now-bg))] border-[hsl(var(--now-border))];
+  }
+
+  .section-next {
+    @apply bg-[hsl(var(--next-bg))] border-[hsl(var(--next-border))];
+  }
+
+  .section-achieved {
+    @apply bg-[hsl(var(--achieved-bg))] border-[hsl(var(--achieved-border))];
+  }
+
+  .agent-bubble {
+    @apply bg-[hsl(var(--agent-bubble))];
+  }
+
+  .user-bubble {
+    @apply bg-[hsl(var(--user-bubble))];
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Custom scrollbar for chat */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+/* Spiral animation */
+@keyframes spiral-progress {
+  from {
+    stroke-dashoffset: 283;
+  }
+}
+
+.animate-spiral {
+  animation: spiral-progress 1.5s ease-out forwards;
+}
+
+/* Gentle pulse for focus state */
+@keyframes gentle-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 8px hsl(var(--primary) / 0);
+  }
+}
+
+.pulse-focus {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}
+
+/* Slide up animation */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out forwards;
+}
+
+/* Celebration animation */
+@keyframes celebrate {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-celebrate {
+  animation: celebrate 0.5s ease-out;
+}
