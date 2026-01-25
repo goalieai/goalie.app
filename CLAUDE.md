@@ -6,15 +6,15 @@ AI agent to help users achieve their New Year's resolutions through micro-task m
 
 ## Stack
 
-| Component | Technology |
-|-----------|------------|
-| **Frontend** | React 19 + TypeScript 5.9 + Vite 7 |
-| **Styling** | Tailwind CSS 3.4 + Radix UI |
-| **Backend** | FastAPI + LangGraph + Gemini |
-| **Observability** | Comet Opik |
-| **Frontend Hosting** | Vercel |
-| **Backend Hosting** | Google Cloud Run |
-| **CI/CD** | GitHub Actions |
+| Component            | Technology                         |
+| -------------------- | ---------------------------------- |
+| **Frontend**         | React 19 + TypeScript 5.9 + Vite 7 |
+| **Styling**          | Tailwind CSS 3.4 + Radix UI        |
+| **Backend**          | FastAPI + LangGraph + Gemini       |
+| **Observability**    | Comet Opik                         |
+| **Frontend Hosting** | Vercel                             |
+| **Backend Hosting**  | Google Cloud Run                   |
+| **CI/CD**            | GitHub Actions                     |
 
 ## Project Structure
 
@@ -45,6 +45,7 @@ goally/
 ## Quick Start
 
 ### Frontend
+
 ```bash
 cd frontend
 pnpm install    # or npm install
@@ -52,6 +53,7 @@ pnpm dev        # Runs at http://localhost:5173
 ```
 
 ### Backend
+
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -61,12 +63,14 @@ uvicorn app.main:app --reload  # Runs at http://localhost:8000
 ## Environment Variables
 
 ### Backend (`backend/.env`)
+
 ```
 GOOGLE_API_KEY=your_gemini_api_key
 OPIK_API_KEY=your_opik_api_key
 ```
 
 ### Frontend (`frontend/.env`)
+
 ```
 VITE_API_BASE_URL=http://localhost:8000
 ```
@@ -74,6 +78,7 @@ VITE_API_BASE_URL=http://localhost:8000
 ## Frontend Architecture
 
 ### Key Components
+
 - **TaskCard** - Individual task with Done/Re-plan actions
 - **AgentChat** - Sidebar chat with AI coach
 - **AgentFeedback** - Contextual suggestions (breaks, reschedule, motivation)
@@ -81,12 +86,14 @@ VITE_API_BASE_URL=http://localhost:8000
 - **DashboardHeader** - Dynamic greeting + progress summary
 
 ### Design System
+
 - **Primary Color:** Orange (hsl 25 95% 53%) - Energy, motivation
 - **Secondary Color:** Cream (hsl 35 40% 94%) - Calm, rest
 - **Success:** Green (hsl 140 50% 45%) - Completed tasks
 - **Fonts:** Nunito (body), Space Grotesk (display)
 
 ### UX Principles (ADHD-Friendly)
+
 - Miller's Law: Max 3+1 sections (NOW, NEXT, ACHIEVED)
 - Fitts' Law: Large touch targets (56-64px buttons)
 - Micro-tasks with time estimates
