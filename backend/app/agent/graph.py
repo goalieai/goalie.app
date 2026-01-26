@@ -167,6 +167,7 @@ async def run_orchestrator(
         "user_input": message,
         "user_profile": session.user_profile,
         "session_id": session_id,
+        "user_id": user_id,  # Pass user_id for fetching global context from DB
         "active_plans": session.active_plans,
         "completed_tasks": session.completed_tasks,
         "intent": None,

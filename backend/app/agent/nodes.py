@@ -1,4 +1,5 @@
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langchain_openai import ChatOpenAI
@@ -28,6 +29,7 @@ from app.agent.state import AgentState
 from app.agent.schema import SmartGoalSchema, TaskList, ProjectPlan, IntentClassification
 from app.agent.prompts import build_system_prompt, load_prompt
 from app.agent.tools.crud import ALL_TOOLS
+from app.core.supabase import supabase
 
 
 # =============================================================================
@@ -90,7 +92,7 @@ llm_conversational_fallback = create_llm(
 
 async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_output=None):
     """
-    Try primary model, fall back to secondary on rate limit errors.
+    Try primary model, fall back to secondary on rate limit or parsing errors.
 
     Args:
         llm_primary: Primary LLM instance
@@ -107,14 +109,100 @@ async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_o
     try:
         return await primary.ainvoke(messages)
     except Exception as e:
-        # Check for rate limits or other temporary errors
         error_str = str(e).upper()
+        error_type = type(e).__name__
         print(f"[DEBUG] Primary LLM error: {e}")
-        print(f"[DEBUG] Error type: {type(e).__name__}")
-        if any(x in error_str for x in ["429", "RESOURCE_EXHAUSTED", "RATE_LIMIT"]):
-            print(f"Rate limit on {settings.llm_primary_model}, falling back to {settings.llm_fallback_model}")
+        print(f"[DEBUG] Error type: {error_type}")
+
+        # Fall back on rate limits, output parsing errors, or empty responses
+        should_fallback = (
+            any(x in error_str for x in ["429", "RESOURCE_EXHAUSTED", "RATE_LIMIT"]) or
+            isinstance(e, OutputParserException) or
+            "INVALID JSON" in error_str or
+            "OUTPUTPARSERERROR" in error_str
+        )
+
+        if should_fallback:
+            print(f"[DEBUG] Falling back from {settings.llm_primary_model} to {settings.llm_fallback_model}")
             return await fallback.ainvoke(messages)
         raise
+
+
+# ============================================================
+# USER CONTEXT FROM DATABASE
+# ============================================================
+
+
+async def get_user_context(user_id: str) -> dict:
+    """
+    Fetch user's tasks and goals from Supabase.
+
+    This gives the agent awareness of ALL user data, not just session-created plans.
+    """
+    if not supabase or not user_id:
+        return {"active_tasks": [], "completed_tasks": [], "goals": []}
+
+    try:
+        # Fetch tasks
+        tasks_res = supabase.table("tasks").select("*").eq("user_id", user_id).execute()
+        tasks = tasks_res.data or []
+
+        # Fetch goals
+        goals_res = supabase.table("goals").select("*").eq("user_id", user_id).execute()
+        goals = goals_res.data or []
+
+        # Separate active vs completed tasks
+        active_tasks = [t for t in tasks if t.get("status") != "completed"]
+        completed_tasks = [t for t in tasks if t.get("status") == "completed"]
+
+        return {
+            "active_tasks": active_tasks,
+            "completed_tasks": completed_tasks,
+            "goals": goals,
+        }
+    except Exception as e:
+        print(f"[DEBUG] Error fetching user context: {e}")
+        return {"active_tasks": [], "completed_tasks": [], "goals": []}
+
+
+def format_user_context_for_prompt(context: dict) -> str:
+    """Format user context as a string for injection into system prompts."""
+    parts = []
+
+    # Active tasks
+    active = context.get("active_tasks", [])
+    if active:
+        task_lines = []
+        for t in active[:10]:  # Limit to 10 to avoid prompt bloat
+            name = t.get("task_name", "Unnamed task")
+            scheduled = t.get("scheduled_text", "")
+            energy = t.get("energy_required", "")
+            task_lines.append(f"  - {name}" + (f" ({scheduled})" if scheduled else "") + (f" [{energy} energy]" if energy else ""))
+        parts.append(f"Active tasks ({len(active)}):\n" + "\n".join(task_lines))
+    else:
+        parts.append("Active tasks: None")
+
+    # Completed tasks
+    completed = context.get("completed_tasks", [])
+    if completed:
+        recent = completed[:5]  # Show last 5 completed
+        task_names = [t.get("task_name", "Unnamed") for t in recent]
+        parts.append(f"Recently completed ({len(completed)} total): {', '.join(task_names)}")
+
+    # Goals
+    goals = context.get("goals", [])
+    if goals:
+        goal_lines = []
+        for g in goals[:5]:  # Limit to 5
+            title = g.get("title", "Unnamed goal")
+            emoji = g.get("emoji", "🎯")
+            status = g.get("status", "active")
+            goal_lines.append(f"  - {emoji} {title} ({status})")
+        parts.append(f"Goals ({len(goals)}):\n" + "\n".join(goal_lines))
+    else:
+        parts.append("Goals: None set yet")
+
+    return "\n\n".join(parts)
 
 
 # ============================================================
@@ -125,19 +213,32 @@ async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_o
 async def intent_router_node(state: AgentState) -> dict:
     """Classify user intent to route to the appropriate agent."""
     user_message = state["user_input"]
+    user_id = state.get("user_id")
 
-    # Build context from session if available
+    # Build context from database + session
     context_parts = []
+
+    # Fetch real data from database
+    if user_id:
+        db_context = await get_user_context(user_id)
+        active_tasks = db_context.get("active_tasks", [])
+        completed_tasks = db_context.get("completed_tasks", [])
+        goals = db_context.get("goals", [])
+
+        if active_tasks:
+            context_parts.append(f"User has {len(active_tasks)} active task(s) in database.")
+        if completed_tasks:
+            context_parts.append(f"User has completed {len(completed_tasks)} task(s).")
+        if goals:
+            context_parts.append(f"User has {len(goals)} goal(s) set.")
+
+    # Also include session-specific plans
     if state.get("active_plans"):
         context_parts.append(
-            f"User has {len(state['active_plans'])} active plan(s)."
-        )
-    if state.get("completed_tasks"):
-        context_parts.append(
-            f"User has completed {len(state['completed_tasks'])} task(s)."
+            f"User has {len(state['active_plans'])} active session plan(s)."
         )
 
-    context = "\n".join(context_parts) if context_parts else "No existing plans."
+    context = "\n".join(context_parts) if context_parts else "No existing tasks or plans."
 
     system_prompt = load_prompt("orchestrator")
     user_prompt = f"""Session context: {context}
@@ -162,11 +263,16 @@ async def casual_node(state: AgentState) -> dict:
     """Handle casual conversation, greetings, and general questions."""
     user_message = state["user_input"]
     user_name = state["user_profile"].name
+    user_id = state.get("user_id")
 
     system_prompt = build_system_prompt("system_base", "casual")
 
-    # Add user context
-    user_context = f"User's name: {user_name}"
+    # Fetch global user context from database
+    db_context = await get_user_context(user_id)
+    context_str = format_user_context_for_prompt(db_context)
+
+    # Build full system prompt with user context
+    user_context = f"User's name: {user_name}\n\n{context_str}"
     full_system = f"{system_prompt}\n\n## Current User\n{user_context}"
 
     messages = [
@@ -193,27 +299,35 @@ async def coaching_node(state: AgentState) -> dict:
     """Handle progress reviews, motivation, and setback discussions."""
     user_message = state["user_input"]
     user_name = state["user_profile"].name
+    user_id = state.get("user_id")
     active_plans = state.get("active_plans", [])
-    completed_tasks = state.get("completed_tasks", [])
+    session_completed = state.get("completed_tasks", [])
 
     system_prompt = build_system_prompt("system_base", "coaching")
 
-    # Build progress context
+    # Fetch global user context from database
+    db_context = await get_user_context(user_id)
+    context_str = format_user_context_for_prompt(db_context)
+
+    # Build progress context combining session plans + DB data
     progress_parts = [f"User's name: {user_name}"]
 
+    # Add database context (tasks and goals from Supabase)
+    progress_parts.append(f"\n## From Database\n{context_str}")
+
+    # Add session-specific plans (if any)
     if active_plans:
+        progress_parts.append("\n## Session Plans")
         for plan in active_plans:
             total = len(plan.tasks)
-            done = sum(1 for t in plan.tasks if t.task_name in completed_tasks)
+            done = sum(1 for t in plan.tasks if t.task_name in session_completed)
             progress_parts.append(
                 f"\nPlan: {plan.project_name}"
                 f"\n- Progress: {done}/{total} tasks ({round(done/total*100) if total else 0}%)"
                 f"\n- Deadline: {plan.deadline}"
                 f"\n- Tasks: {', '.join(t.task_name for t in plan.tasks)}"
-                f"\n- Completed: {', '.join(completed_tasks) if completed_tasks else 'None yet'}"
+                f"\n- Completed: {', '.join(session_completed) if session_completed else 'None yet'}"
             )
-    else:
-        progress_parts.append("\nNo active plans yet.")
 
     full_system = f"{system_prompt}\n\n## User Context\n{''.join(progress_parts)}"
 

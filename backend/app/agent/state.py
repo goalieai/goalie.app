@@ -16,6 +16,7 @@ class AgentState(TypedDict):
 
     # Session context (from memory)
     session_id: Optional[str]
+    user_id: Optional[str]  # For fetching user data from Supabase
     active_plans: Optional[List[ProjectPlan]]
     completed_tasks: Optional[List[str]]
 
