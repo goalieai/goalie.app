@@ -46,6 +46,8 @@ goally/
 
 ### Frontend
 
+### Development
+
 ```bash
 cd frontend
 pnpm install    # or npm install
