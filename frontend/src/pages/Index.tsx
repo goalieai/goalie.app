@@ -2,45 +2,26 @@ import { useState, useCallback, useRef, useMemo } from "react";
 import { Clock, MessageCircle, X, Medal } from "lucide-react";
 import { agentApi, Action } from "@/services/api";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
 import { useTasks, useCompleteTask } from "@/hooks/useTasks";
 import { useGoals } from "@/hooks/useGoals";
 import DashboardHeader from "@/components/DashboardHeader";
 import TaskCard from "@/components/TaskCard";
 import SectionHeader from "@/components/SectionHeader";
-import AgentFeedback from "@/components/AgentFeedback";
+import ProgressSpiral from "@/components/ProgressSpiral";
 import AgentChat from "@/components/AgentChat";
-import MedalTask from "@/components/MedalTask";
-import MotivationalQuote from "@/components/MotivationalQuote";
 import AddTaskForm from "@/components/AddTaskForm";
 import AddGoalForm from "@/components/AddGoalForm";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import goalieLogo from "@/assets/goalie-logo.jpeg";
 
-// Initial goals data (fallback)
-const initialGoals = [
-  { id: "g1", title: "Learn Spanish", emoji: "🇪🇸" },
-];
-
-// Sample data (fallback)
-const initialTasksMock = {
+// Empty state for tasks
+const emptyTasks = {
   now: null,
   next: [],
   achieved: [],
 };
-
-const initialSuggestions = [
-  {
-    id: "s1",
-    message: "You've been working for 45 minutes. Would you like to take a 5-minute break?",
-    type: "break" as const,
-  },
-  {
-    id: "s2",
-    message: "I noticed 'Review team feedback' might take longer than planned. Should I move it to 11:30 AM?",
-    type: "reschedule" as const,
-  },
-];
 
 interface Message {
   id: string;
@@ -49,16 +30,10 @@ interface Message {
   timestamp: Date;
 }
 
-const initialMessages: Message[] = [
-  {
-    id: "m1",
-    content: "Hey! 👋 I see you're about to start your project proposal. Remember, you've got this! Just focus on getting your ideas down first.",
-    sender: "agent",
-    timestamp: new Date(),
-  },
-];
-
 const Index = () => {
+  // Auth
+  const { user, isGuest } = useAuth();
+
   // Queries
   const { data: tasksData } = useTasks();
   const { data: goalsData, isLoading: isLoadingGoals } = useGoals();
@@ -66,8 +41,7 @@ const Index = () => {
   const queryClient = useQueryClient();
 
   // Local state for UI only
-  const [suggestions, setSuggestions] = useState(initialSuggestions);
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
 
@@ -76,7 +50,7 @@ const Index = () => {
 
   // Derived state for Tasks
   const tasks = useMemo(() => {
-    if (!tasksData) return initialTasksMock;
+    if (!tasksData) return emptyTasks;
 
     // Map tasks to UI format
     const achieved = tasksData
@@ -110,7 +84,7 @@ const Index = () => {
 
   // Derived state for Goals
   const goals = useMemo(() => {
-    return goalsData || initialGoals;
+    return goalsData || [];
   }, [goalsData]);
 
   const currentDate = new Date().toLocaleDateString("en-US", {
@@ -154,14 +128,6 @@ const Index = () => {
     setIsChatOpen(true);
   }, []);
 
-  const handleAcceptSuggestion = useCallback((id: string) => {
-    setSuggestions((prev) => prev.filter((s) => s.id !== id));
-  }, []);
-
-  const handleDismissSuggestion = useCallback((id: string) => {
-    setSuggestions((prev) => prev.filter((s) => s.id !== id));
-  }, []);
-
   // Process actions returned by the AI agent
   const processAction = useCallback((action: Action) => {
     const { type } = action;
@@ -198,7 +164,9 @@ const Index = () => {
       const response = await agentApi.sendMessage({
         message: content,
         session_id: sessionIdRef.current || undefined,
-        user_profile: { name: "Alex" },
+        user_profile: {
+          name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
+        },
       });
 
       // Store session ID for conversation continuity
@@ -234,25 +202,27 @@ const Index = () => {
     } finally {
       setIsTyping(false);
     }
-  }, [processAction]);
+  }, [processAction, isGuest, user]);
 
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
         {/* Main Content */}
         <main className="flex-1 p-6 lg:p-8 max-w-6xl mx-auto">
-          <DashboardHeader
-            userName="Alex"
-            completedTasks={completedCount}
-            totalTasks={totalCount}
-            currentDate={currentDate}
-          />
+          <DashboardHeader currentDate={currentDate} />
 
           {/* Three Section Layout - Miller's Law */}
           <div className="grid gap-6 lg:gap-8">
             {/* NOW Section - Your Goalie Goals */}
             <section className="section-now rounded-2xl border-2 p-4 sm:p-6 lg:p-8">
-              <h2 className="text-2xl sm:text-3xl font-bold text-primary mb-4">YOUR GOALIE</h2>
+              <div className="flex items-start justify-between mb-4">
+                <h2 className="text-2xl sm:text-3xl font-bold text-primary">YOUR GOALIE</h2>
+                <ProgressSpiral
+                  completed={completedCount}
+                  total={totalCount}
+                  className="w-14 h-14 sm:w-20 sm:h-20"
+                />
+              </div>
 
               {/* User Goals List */}
               <div className="mb-6 space-y-2">
@@ -301,7 +271,6 @@ const Index = () => {
                 />
                 <AddTaskForm />
               </div>
-              <MedalTask task="Morning Meditation" completed className="mb-4" />
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
                 {tasks.next.map((task) => (
                   <TaskCard
@@ -348,22 +317,6 @@ const Index = () => {
             </section>
           </div>
 
-          {/* Agent Feedback - Calendar Suggestions */}
-          {suggestions.length > 0 && (
-            <div className="mt-8">
-              <h3 className="text-lg font-semibold mb-4 text-foreground">
-                Goalie's Suggestions
-              </h3>
-              <AgentFeedback
-                suggestions={suggestions}
-                onAccept={handleAcceptSuggestion}
-                onDismiss={handleDismissSuggestion}
-              />
-            </div>
-          )}
-
-          {/* Motivational Quote */}
-          <MotivationalQuote quote="I FEELING GOOD" author="Elon Musk" />
         </main>
 
         {/* Agent Chat Sidebar - Trading Chat */}
