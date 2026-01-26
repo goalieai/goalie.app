@@ -1,17 +1,24 @@
-import asyncio
+import os
 from supabase import create_client, Client
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Credentials verified from user logs
-SUPABASE_URL = "http://127.0.0.1:54321"
-SUPABASE_KEY = "sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz"
+# Load from environment variables
+SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_KEY:
+    raise ValueError("SUPABASE_KEY environment variable is required")
 
 USER_ID = "11111111-1111-1111-1111-111111111111"
-EMAIL = "test_unique_999@example.com"
-PASSWORD = "password123"
+EMAIL = os.getenv("TEST_USER_EMAIL", "test_unique_999@example.com")
+PASSWORD = os.getenv("TEST_USER_PASSWORD", "password123")
 
 def create_user():
     print(f"Connecting to {SUPABASE_URL}...")
