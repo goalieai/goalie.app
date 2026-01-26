@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   id: string;
@@ -72,7 +73,55 @@ const AgentChat = ({ messages, onSendMessage, isTyping = false }: AgentChatProps
                   : "bg-primary text-primary-foreground rounded-br-md"
               )}
             >
-              <p className="leading-relaxed">{message.content}</p>
+              {message.sender === "agent" ? (
+                <div className="leading-relaxed space-y-3">
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => {
+                        const text = String(children);
+                        // Style "Goal:" lines as a highlight box
+                        if (text.startsWith("Goal:")) {
+                          return (
+                            <div className="bg-primary/10 border-l-4 border-primary px-3 py-2 rounded-r-lg my-3">
+                              <p className="font-semibold text-foreground">{children}</p>
+                            </div>
+                          );
+                        }
+                        // Style "Your Plan:" or "Your Action Plan:" as section headers
+                        if (text.match(/^Your (Action )?Plan:/)) {
+                          return (
+                            <p className="font-semibold text-foreground mt-4 mb-2 border-b border-border/50 pb-1">
+                              {children}
+                            </p>
+                          );
+                        }
+                        // Style emoji time-of-day lines (🌅, ☀️, 🌙)
+                        if (text.match(/^[🌅☀️🌙]/)) {
+                          return (
+                            <div className="bg-secondary/30 rounded-lg px-3 py-2 my-2">
+                              <p className="font-medium">{children}</p>
+                            </div>
+                          );
+                        }
+                        return <p className="my-2 first:mt-0 last:mb-0">{children}</p>;
+                      },
+                      strong: ({ children }) => (
+                        <strong className="font-semibold text-foreground">{children}</strong>
+                      ),
+                      ul: ({ children }) => (
+                        <ul className="my-2 ml-4 space-y-1.5 list-disc">{children}</ul>
+                      ),
+                      li: ({ children }) => (
+                        <li className="leading-relaxed pl-1">{children}</li>
+                      ),
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p className="leading-relaxed">{message.content}</p>
+              )}
             </div>
           </div>
         ))}
