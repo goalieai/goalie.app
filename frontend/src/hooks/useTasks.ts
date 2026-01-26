@@ -1,36 +1,26 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { taskApi } from "@/services/api";
-import { storageApi } from "@/services/storage";
+import { useAuth } from "@/contexts/AuthContext";
+import { getStore } from "@/services/store";
 import { TaskCreate, TaskUpdate } from "@/types/database";
 
-// TODO: Replace with real user ID from auth context
-const USER_ID = "a7bed60b-dcb6-458c-b17b-f51b0c73fd7d";
-
-// If no user ID, we treat as guest
-const IS_GUEST = !USER_ID;
-
 export function useTasks() {
+    const { user, isGuest } = useAuth();
+    const store = getStore(user?.id ?? null);
+
     return useQuery({
-        queryKey: ["tasks", USER_ID || "guest"],
-        queryFn: async () => {
-            if (IS_GUEST) {
-                return storageApi.tasks.getAll();
-            }
-            return taskApi.getAll(USER_ID);
-        },
+        queryKey: ["tasks", user?.id ?? "guest"],
+        queryFn: () => store.tasks.getAll(),
+        enabled: !isGuest || true, // Always enabled (guest uses localStorage)
     });
 }
 
 export function useCreateTask() {
+    const { user } = useAuth();
+    const store = getStore(user?.id ?? null);
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (data: TaskCreate) => {
-            if (IS_GUEST) {
-                return storageApi.tasks.create(data);
-            }
-            return taskApi.create({ ...data, user_id: USER_ID });
-        },
+        mutationFn: (data: TaskCreate) => store.tasks.create(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
         },
@@ -38,15 +28,13 @@ export function useCreateTask() {
 }
 
 export function useUpdateTask() {
+    const { user } = useAuth();
+    const store = getStore(user?.id ?? null);
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ id, data }: { id: string; data: TaskUpdate }) => {
-            if (IS_GUEST) {
-                return storageApi.tasks.update(id, data);
-            }
-            return taskApi.update(id, { ...data, user_id: USER_ID });
-        },
+        mutationFn: ({ id, data }: { id: string; data: TaskUpdate }) =>
+            store.tasks.update(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
         },
@@ -54,15 +42,12 @@ export function useUpdateTask() {
 }
 
 export function useDeleteTask() {
+    const { user } = useAuth();
+    const store = getStore(user?.id ?? null);
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (taskId: string) => {
-            if (IS_GUEST) {
-                return storageApi.tasks.delete(taskId);
-            }
-            return taskApi.delete(taskId, USER_ID);
-        },
+        mutationFn: (taskId: string) => store.tasks.delete(taskId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
         },
@@ -70,16 +55,12 @@ export function useDeleteTask() {
 }
 
 export function useCompleteTask() {
+    const { user } = useAuth();
+    const store = getStore(user?.id ?? null);
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (taskId: string) => {
-            if (IS_GUEST) {
-                // For guest, complete is just an update
-                return storageApi.tasks.update(taskId, { status: "completed" });
-            }
-            return taskApi.complete(taskId, USER_ID);
-        },
+        mutationFn: (taskId: string) => store.tasks.complete(taskId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
         },
