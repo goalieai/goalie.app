@@ -1,17 +1,17 @@
-"""In-memory session store for conversation persistence."""
-
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from pydantic import BaseModel, Field
+import json
 
-from app.agent.schema import UserProfile, ProjectPlan
+from app.agent.schema import UserProfile, ProjectPlan, MicroTask
+from app.core.supabase import supabase
 
 
 class Message(BaseModel):
     """A single message in the conversation."""
 
     role: str  # "user" or "assistant"
-    content: str
+    content: str | List
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -19,6 +19,7 @@ class SessionState(BaseModel):
     """Persistent state for a user session."""
 
     session_id: str
+    user_id: Optional[str] = None
     user_profile: UserProfile = Field(default_factory=UserProfile)
     message_history: List[Message] = Field(default_factory=list)
     active_plans: List[ProjectPlan] = Field(default_factory=list)
@@ -26,7 +27,7 @@ class SessionState(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     last_active: datetime = Field(default_factory=datetime.now)
 
-    def add_message(self, role: str, content: str) -> None:
+    def add_message(self, role: str, content: str | List) -> None:
         """Add a message to the history."""
         self.message_history.append(Message(role=role, content=content))
         self.last_active = datetime.now()
@@ -60,7 +61,22 @@ class SessionState(BaseModel):
 
 
 class SessionStore:
-    """In-memory session storage (MVP implementation)."""
+    """Base session store interface."""
+
+    def get_or_create(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        user_profile: Optional[UserProfile] = None,
+    ) -> SessionState:
+        raise NotImplementedError
+
+    def save(self, session: SessionState) -> None:
+        pass
+
+
+class MemorySessionStore(SessionStore):
+    """In-memory session storage (Old Implementation)."""
 
     def __init__(self):
         self._sessions: Dict[str, SessionState] = {}
@@ -68,16 +84,16 @@ class SessionStore:
     def get_or_create(
         self,
         session_id: str,
+        user_id: Optional[str] = None,
         user_profile: Optional[UserProfile] = None,
     ) -> SessionState:
-        """Get existing session or create a new one."""
         if session_id not in self._sessions:
             self._sessions[session_id] = SessionState(
                 session_id=session_id,
+                user_id=user_id,
                 user_profile=user_profile or UserProfile(),
             )
         else:
-            # Update user profile if provided
             if user_profile:
                 self._sessions[session_id].user_profile = user_profile
             self._sessions[session_id].last_active = datetime.now()
@@ -85,32 +101,164 @@ class SessionStore:
         return self._sessions[session_id]
 
     def get(self, session_id: str) -> Optional[SessionState]:
-        """Get a session by ID, or None if not found."""
         return self._sessions.get(session_id)
 
-    def delete(self, session_id: str) -> bool:
-        """Delete a session. Returns True if deleted, False if not found."""
-        if session_id in self._sessions:
-            del self._sessions[session_id]
-            return True
-        return False
 
-    def list_sessions(self) -> List[str]:
-        """List all session IDs."""
-        return list(self._sessions.keys())
+class SupabaseSessionStore(SessionStore):
+    """Persistent storage using Supabase."""
 
-    def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
-        """Remove sessions older than max_age_hours. Returns count of removed."""
-        now = datetime.now()
-        old_sessions = [
-            sid
-            for sid, session in self._sessions.items()
-            if (now - session.last_active).total_seconds() > max_age_hours * 3600
-        ]
-        for sid in old_sessions:
-            del self._sessions[sid]
-        return len(old_sessions)
+    def get_or_create(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        user_profile: Optional[UserProfile] = None,
+    ) -> SessionState:
+        if not supabase:
+            print("Warning: Supabase not initialized, falling back to MemorySessionStore")
+            return MemorySessionStore().get_or_create(session_id, user_id, user_profile)
+
+        # 1. Try to fetch session
+        res = supabase.table("sessions").select("*").eq("id", session_id).execute()
+        
+        if res.data:
+            # Load existing session
+            data = res.data[0]
+            session = SessionState(
+                session_id=data["id"],
+                user_id=data["user_id"],
+                user_profile=UserProfile(**data["user_profile"]),
+            )
+            
+            # Load messages
+            msg_res = supabase.table("messages").select("*").eq("session_id", session_id).order("created_at").execute()
+            for m in msg_res.data:
+                # Handle possible JSON/String conversion for text column
+                content = m["content"]
+                try:
+                    if content.startswith('[') or content.startswith('{'):
+                        content = json.loads(content)
+                except:
+                    pass
+                    
+                session.message_history.append(Message(
+                    role=m["role"],
+                    content=content,
+                    timestamp=datetime.fromisoformat(m["created_at"])
+                ))
+            
+            # Load plans and tasks
+            plan_res = supabase.table("plans").select("*, tasks(*)").eq("session_id", session_id).execute()
+            for p in plan_res.data:
+                tasks = [MicroTask(**t) for t in p["tasks"]]
+                plan = ProjectPlan(
+                    project_name=p["project_name"],
+                    smart_goal_summary=p["smart_goal_summary"],
+                    deadline=p["deadline"],
+                    tasks=tasks
+                )
+                session.active_plans.append(plan)
+                
+            return session
+        
+        # 2. Create new session if not found
+        session = SessionState(
+            session_id=session_id,
+            user_id=user_id,
+            user_profile=user_profile or UserProfile(),
+        )
+        
+        supabase.table("sessions").upsert({
+            "id": session_id,
+            "user_id": user_id,
+            "user_profile": session.user_profile.model_dump(),
+            "last_active": datetime.now().isoformat()
+        }).execute()
+        
+        return session
+
+    def save(self, session: SessionState) -> None:
+        """Save session state to Supabase."""
+        if not supabase or not session.user_id: return
+
+        # Update session metadata
+        supabase.table("sessions").update({
+            "user_profile": session.user_profile.model_dump(),
+            "last_active": datetime.now().isoformat()
+        }).eq("id", session.session_id).execute()
+
+        # Update plans (simplified: just save the active plans)
+        for plan in session.active_plans:
+            plan_data = {
+                "session_id": session.session_id,
+                "user_id": session.user_id, # Added for optimized schema
+                "project_name": plan.project_name,
+                "smart_goal_summary": plan.smart_goal_summary,
+                "deadline": plan.deadline
+            }
+            # Upsert plan based on project_name + session_id or similar?
+            # For hackathon simplicity, let's just insert/update if we had IDs
+            # but we'll stick to basic sync for now.
+            res = supabase.table("plans").upsert(plan_data, on_conflict="session_id,project_name").execute()
+            
+            if res.data:
+                plan_id = res.data[0]["id"]
+                for task in plan.tasks:
+                    task_data = {
+                        "plan_id": plan_id,
+                        "user_id": session.user_id, # Added for optimized schema
+                        "task_name": task.task_name,
+                        "estimated_minutes": task.estimated_minutes,
+                        "energy_required": task.energy_required,
+                        "assigned_anchor": task.assigned_anchor,
+                        "rationale": task.rationale
+                    }
+                    supabase.table("tasks").upsert(task_data, on_conflict="plan_id,task_name").execute()
+
+    def add_message(self, session_id: str, user_id: str, role: str, content: str | List):
+        """Helper to save message directly."""
+        if not supabase or not user_id: return
+        
+        # Convert List content to string for TEXT column if necessary
+        save_content = content
+        if not isinstance(content, str):
+            save_content = json.dumps(content)
+            
+        supabase.table("messages").insert({
+            "session_id": session_id,
+            "user_id": user_id, # Added for optimized schema
+            "role": role,
+            "content": save_content
+        }).execute()
 
 
-# Global session store instance
-session_store = SessionStore()
+class HybridSessionStore:
+    """Routes sessions to Memory or Supabase based on user_id."""
+
+    def __init__(self):
+        self.memory_store = MemorySessionStore()
+        self.supabase_store = SupabaseSessionStore()
+
+    def get_or_create(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        user_profile: Optional[UserProfile] = None,
+    ) -> SessionState:
+        if user_id:
+            return self.supabase_store.get_or_create(session_id, user_id, user_profile)
+        return self.memory_store.get_or_create(session_id, user_id, user_profile)
+
+    def save(self, session: SessionState) -> None:
+        if session.user_id:
+            self.supabase_store.save(session)
+        # In-memory is handled by object reference
+
+    def add_message(self, session: SessionState, role: str, content: str | List):
+        """Unified message adding with optional persistence."""
+        session.add_message(role, content)
+        if session.user_id and supabase:
+            self.supabase_store.add_message(session.session_id, session.user_id, role, content)
+
+
+# Global session store instance (Updated to Hybrid)
+session_store = HybridSessionStore()

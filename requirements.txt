@@ -6,6 +6,9 @@ uvicorn[standard]>=0.27.0
 langchain>=0.1.0
 langgraph>=0.0.40
 langchain-google-genai>=1.0.0
+langchain-openai
+langchain-ollama
+langchain-core
 
 # Observability
 opik>=0.1.0
@@ -14,3 +17,6 @@ opik>=0.1.0
 python-dotenv>=1.0.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
+
+# Database
+supabase

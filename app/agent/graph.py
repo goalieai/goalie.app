@@ -1,3 +1,4 @@
+from typing import Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
 
@@ -139,6 +140,7 @@ orchestrator_graph = orchestrator_workflow.compile()
 async def run_orchestrator(
     message: str,
     session_id: str,
+    user_id: Optional[str] = None,
     user_profile: UserProfile | None = None,
 ) -> dict:
     """
@@ -147,16 +149,17 @@ async def run_orchestrator(
     Args:
         message: The user's message
         session_id: Unique session identifier
+        user_id: Optional user identifier for persistent storage
         user_profile: Optional user profile (used to update session)
 
     Returns:
         dict with 'response', 'intent_detected', and optionally 'plan'
     """
     # Get or create session
-    session = session_store.get_or_create(session_id, user_profile)
+    session = session_store.get_or_create(session_id, user_id, user_profile)
 
-    # Add user message to history
-    session.add_message("user", message)
+    # Add user message to history (and persist to Supabase if user_id present)
+    session_store.add_message(session, "user", message)
 
     # Build initial state with session context
     initial_state = {
@@ -171,6 +174,7 @@ async def run_orchestrator(
         "raw_tasks": None,
         "final_plan": None,
         "response": None,
+        "actions": [],
     }
 
     # Run the orchestrator
@@ -178,11 +182,14 @@ async def run_orchestrator(
 
     # Save assistant response to history
     if result.get("response"):
-        session.add_message("assistant", result["response"])
+        session_store.add_message(session, "assistant", result["response"])
 
     # If a plan was created, add it to session
     if result.get("final_plan"):
         session.add_plan(result["final_plan"])
+
+    # Final save for profile updates or plan changes
+    session_store.save(session)
 
     # Build response
     response = {
@@ -191,6 +198,7 @@ async def run_orchestrator(
         "response": result.get("response", "I'm here to help you achieve your goals!"),
         "plan": result.get("final_plan"),
         "progress": session.get_progress() if session.active_plans else None,
+        "actions": result.get("actions", []),
     }
 
     return response

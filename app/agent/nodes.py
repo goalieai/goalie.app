@@ -1,48 +1,91 @@
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
 from app.core.config import settings
+
+
+def extract_text_content(content) -> str:
+    """Extract text from LLM response content.
+
+    Handles both string content and list of content blocks (Gemini 3 format).
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Extract text from content blocks
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        return "".join(texts)
+    return str(content)
 from app.agent.state import AgentState
 from app.agent.schema import SmartGoalSchema, TaskList, ProjectPlan, IntentClassification
 from app.agent.prompts import build_system_prompt, load_prompt
+from app.agent.tools.crud import ALL_TOOLS
 
 
 # =============================================================================
 # LLM Instances (configured via settings)
 # =============================================================================
 
-llm_primary = ChatGoogleGenerativeAI(
-    model=settings.llm_primary_model,
-    google_api_key=settings.google_api_key,
-    temperature=settings.llm_primary_temperature,
-    max_retries=settings.llm_primary_max_retries,
-    convert_system_message_to_human=True,
+def create_llm(model_name: str, temperature: float, max_retries: int):
+    """Factory to create the appropriate LLM instance."""
+    if "gemini" in model_name.lower():
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=settings.google_api_key,
+            temperature=temperature,
+            max_retries=max_retries,
+            convert_system_message_to_human=True,
+        )
+    elif "gpt" in model_name.lower() or "openai" in model_name.lower():
+        return ChatOpenAI(
+            model=model_name,
+            api_key=settings.openai_api_key,
+            temperature=temperature,
+            max_retries=max_retries,
+        )
+    elif "ollama:" in model_name.lower():
+        # Format: "ollama:model_name" e.g. "ollama:llama3.2" or "ollama:mistral"
+        ollama_model = model_name.split(":", 1)[1]
+        return ChatOllama(
+            model=ollama_model,
+            temperature=temperature,
+        )
+    else:
+        # Default fallback or error
+        raise ValueError(f"Unsupported model provider for: {model_name}")
+
+
+llm_primary = create_llm(
+    settings.llm_primary_model,
+    settings.llm_primary_temperature,
+    settings.llm_primary_max_retries,
 )
 
-llm_fallback = ChatGoogleGenerativeAI(
-    model=settings.llm_fallback_model,
-    google_api_key=settings.google_api_key,
-    temperature=settings.llm_fallback_temperature,
-    max_retries=settings.llm_fallback_max_retries,
-    convert_system_message_to_human=True,
+llm_fallback = create_llm(
+    settings.llm_fallback_model,
+    settings.llm_fallback_temperature,
+    settings.llm_fallback_max_retries,
 )
 
-llm_conversational_primary = ChatGoogleGenerativeAI(
-    model=settings.llm_primary_model,
-    google_api_key=settings.google_api_key,
-    temperature=settings.llm_conversational_temperature,
-    max_retries=settings.llm_primary_max_retries,
-    convert_system_message_to_human=True,
-)
+llm_conversational_primary = create_llm(
+    settings.llm_primary_model,
+    settings.llm_conversational_temperature,
+    settings.llm_primary_max_retries,
+).bind_tools(ALL_TOOLS)
 
-llm_conversational_fallback = ChatGoogleGenerativeAI(
-    model=settings.llm_fallback_model,
-    google_api_key=settings.google_api_key,
-    temperature=settings.llm_conversational_temperature,
-    max_retries=settings.llm_fallback_max_retries,
-    convert_system_message_to_human=True,
-)
+llm_conversational_fallback = create_llm(
+    settings.llm_fallback_model,
+    settings.llm_conversational_temperature,
+    settings.llm_fallback_max_retries,
+).bind_tools(ALL_TOOLS)
 
 
 async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_output=None):
@@ -63,8 +106,12 @@ async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_o
 
     try:
         return await primary.ainvoke(messages)
-    except ChatGoogleGenerativeAIError as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+    except Exception as e:
+        # Check for rate limits or other temporary errors
+        error_str = str(e).upper()
+        print(f"[DEBUG] Primary LLM error: {e}")
+        print(f"[DEBUG] Error type: {type(e).__name__}")
+        if any(x in error_str for x in ["429", "RESOURCE_EXHAUSTED", "RATE_LIMIT"]):
             print(f"Rate limit on {settings.llm_primary_model}, falling back to {settings.llm_fallback_model}")
             return await fallback.ainvoke(messages)
         raise
@@ -131,7 +178,15 @@ async def casual_node(state: AgentState) -> dict:
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
-    return {"response": response.content}
+    # Extract tool calls (actions)
+    actions = []
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        actions = [
+            {"type": call["name"], "data": call["args"]}
+            for call in response.tool_calls
+        ]
+
+    return {"response": extract_text_content(response.content), "actions": actions}
 
 
 async def coaching_node(state: AgentState) -> dict:
@@ -171,7 +226,15 @@ async def coaching_node(state: AgentState) -> dict:
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
-    return {"response": response.content}
+    # Extract tool calls (actions)
+    actions = []
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        actions = [
+            {"type": call["name"], "data": call["args"]}
+            for call in response.tool_calls
+        ]
+
+    return {"response": extract_text_content(response.content), "actions": actions}
 
 
 async def planning_response_node(state: AgentState) -> dict:
@@ -198,7 +261,7 @@ async def planning_response_node(state: AgentState) -> dict:
 
     for task in final_plan.tasks:
         anchor_lower = task.assigned_anchor.lower()
-        emoji = "sunny"
+        emoji = "sunrise"  # Default
         for key, value in anchor_emojis.items():
             if key in anchor_lower:
                 emoji = value
@@ -230,7 +293,7 @@ Present this plan to the user in a friendly, encouraging way. Use their language
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
-    return {"response": response.content}
+    return {"response": extract_text_content(response.content)}
 
 
 # ============================================================
