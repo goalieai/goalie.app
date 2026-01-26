@@ -1,11 +1,14 @@
 from typing import List, Optional, Literal
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 import traceback
+from datetime import datetime
 
 from app.agent.graph import run_agent, run_planning_pipeline, run_orchestrator
 from app.agent.schema import UserProfile, MicroTask
+from app.core.supabase import supabase
+from app.api import schemas
 
 router = APIRouter()
 
@@ -217,3 +220,193 @@ async def create_plan(request: PlanRequest):
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# ============================================================
+# CRUD ENDPOINTS
+# ============================================================
+
+# --- PROFILES ---
+
+@router.get("/profile/{user_id}", response_model=schemas.ProfileResponse)
+async def get_profile(user_id: str):
+    """Get user profile."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        response = supabase.table("profiles").select("*").eq("id", user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Profile not found")
+            
+        return response.data[0]
+    except Exception as e:
+        print(f"Error fetching profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/profile/{user_id}", response_model=schemas.ProfileResponse)
+async def update_profile(user_id: str, profile: schemas.ProfileUpdate):
+    """Update user profile."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        # Prepare update data, removing None values
+        update_data = {k: v for k, v in profile.model_dump().items() if v is not None}
+        
+        response = supabase.table("profiles").update(update_data).eq("id", user_id).execute()
+        
+        if not response.data:
+            # Try inserting if not found (upsert behavior)
+            response = supabase.table("profiles").insert({"id": user_id, **update_data}).execute()
+            
+        return response.data[0]
+    except Exception as e:
+        print(f"Error updating profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- TASKS ---
+
+@router.get("/tasks", response_model=List[schemas.TaskResponse])
+async def list_tasks(user_id: str = Query(..., description="User ID to fetch tasks for")):
+    """List all tasks for a user."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        response = supabase.table("tasks").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/tasks", response_model=schemas.TaskResponse)
+async def create_task(task: schemas.TaskCreate, user_id: str = Query(..., description="User ID")):
+    """Create a new task."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        task_data = task.model_dump()
+        task_data["user_id"] = user_id
+        
+        response = supabase.table("tasks").insert(task_data).execute()
+        return response.data[0]
+    except Exception as e:
+        print(f"Error creating task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/tasks/{task_id}", response_model=schemas.TaskResponse)
+async def update_task(task_id: str, task: schemas.TaskUpdate, user_id: str = Query(..., description="User ID for authorization")):
+    """Update a task."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        update_data = {k: v for k, v in task.model_dump().items() if v is not None}
+        
+        # Verify ownership ensuring user_id matches (basic check)
+        response = supabase.table("tasks").update(update_data).eq("id", task_id).eq("user_id", user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Task not found or unauthorized")
+            
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, user_id: str = Query(..., description="User ID for authorization")):
+    """Delete a task."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        response = supabase.table("tasks").delete().eq("id", task_id).eq("user_id", user_id).execute()
+        
+        if not response.data:
+             raise HTTPException(status_code=404, detail="Task not found or unauthorized")
+             
+        return {"message": "Task deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- GOALS ---
+
+@router.get("/goals", response_model=List[schemas.GoalResponse])
+async def list_goals(user_id: str = Query(..., description="User ID")):
+    """List all goals for a user."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        response = supabase.table("goals").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching goals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/goals", response_model=schemas.GoalResponse)
+async def create_goal(goal: schemas.GoalCreate, user_id: str = Query(..., description="User ID")):
+    """Create a new goal."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        goal_data = goal.model_dump()
+        goal_data["user_id"] = user_id
+        
+        response = supabase.table("goals").insert(goal_data).execute()
+        return response.data[0]
+    except Exception as e:
+        print(f"Error creating goal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/goals/{goal_id}", response_model=schemas.GoalResponse)
+async def update_goal(goal_id: str, goal: schemas.GoalUpdate, user_id: str = Query(..., description="User ID")):
+    """Update a goal."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        update_data = {k: v for k, v in goal.model_dump().items() if v is not None}
+        
+        response = supabase.table("goals").update(update_data).eq("id", goal_id).eq("user_id", user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Goal not found or unauthorized")
+            
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating goal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/goals/{goal_id}")
+async def delete_goal(goal_id: str, user_id: str = Query(..., description="User ID")):
+    """Delete a goal."""
+    try:
+        if not supabase:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+
+        response = supabase.table("goals").delete().eq("id", goal_id).eq("user_id", user_id).execute()
+        
+        if not response.data:
+             raise HTTPException(status_code=404, detail="Goal not found or unauthorized")
+             
+        return {"message": "Goal deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting goal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
