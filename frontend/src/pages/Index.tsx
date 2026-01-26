@@ -1,6 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Clock, Trophy, MessageCircle, X, Medal } from "lucide-react";
-import { agentApi } from "@/services/api";
+import { agentApi, Action } from "@/services/api";
 import DashboardHeader from "@/components/DashboardHeader";
 import TaskCard from "@/components/TaskCard";
 import SectionHeader from "@/components/SectionHeader";
@@ -12,11 +12,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import goalieLogo from "@/assets/goalie-logo.jpeg";
 
-// Sample goals data
-const userGoals = [
-  { id: "g1", goal: "Learn Spanish" },
-  { id: "g2", goal: "Go to the gym" },
-  { id: "g3", goal: "Read 20 pages daily" },
+// Initial goals data
+const initialGoals = [
+  { id: "g1", goal: "Learn Spanish", emoji: "🇪🇸" },
+  { id: "g2", goal: "Go to the gym", emoji: "💪" },
+  { id: "g3", goal: "Read 20 pages daily", emoji: "📚" },
 ];
 
 // Sample data
@@ -63,10 +63,14 @@ const initialMessages: Message[] = [
 
 const Index = () => {
   const [tasks, setTasks] = useState(initialTasks);
+  const [goals, setGoals] = useState(initialGoals);
   const [suggestions, setSuggestions] = useState(initialSuggestions);
   const [messages, setMessages] = useState(initialMessages);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+
+  // Session management for conversation continuity
+  const sessionIdRef = useRef<string | null>(null);
 
   const currentDate = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -125,6 +129,82 @@ const Index = () => {
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
+  // Process actions returned by the AI agent
+  const processAction = useCallback((action: Action) => {
+    const { type, data } = action;
+
+    switch (type) {
+      case "create_task": {
+        const newTask = {
+          id: `task-${Date.now()}`,
+          action: (data.action as string) || (data.task_name as string) || "New task",
+          time: (data.time as string) || (data.scheduled_time as string) || "Anytime",
+        };
+        setTasks((prev) => ({
+          ...prev,
+          next: [...prev.next, newTask],
+        }));
+        break;
+      }
+
+      case "complete_task": {
+        const taskId = data.task_id as string;
+        const taskName = data.task_name as string;
+        setTasks((prev) => {
+          // Find task by ID or name
+          const findTask = (t: { id: string; action: string }) =>
+            t.id === taskId || t.action.toLowerCase().includes((taskName || "").toLowerCase());
+
+          // Check if it's the current task
+          if (prev.now && findTask(prev.now)) {
+            return {
+              ...prev,
+              achieved: [
+                { ...prev.now, time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+                ...prev.achieved,
+              ],
+              now: prev.next[0] || null,
+              next: prev.next.slice(1),
+            };
+          }
+
+          // Check in next tasks
+          const taskIndex = prev.next.findIndex(findTask);
+          if (taskIndex !== -1) {
+            const completedTask = prev.next[taskIndex];
+            return {
+              ...prev,
+              achieved: [
+                { ...completedTask, time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
+                ...prev.achieved,
+              ],
+              next: prev.next.filter((_, i) => i !== taskIndex),
+            };
+          }
+
+          return prev;
+        });
+        break;
+      }
+
+      case "create_goal": {
+        const newGoal = {
+          id: `goal-${Date.now()}`,
+          goal: (data.goal as string) || "New goal",
+          emoji: (data.emoji as string) || "🎯",
+        };
+        setGoals((prev) => [...prev, newGoal]);
+        break;
+      }
+
+      case "update_task": {
+        // Future: handle task updates
+        console.log("update_task action:", data);
+        break;
+      }
+    }
+  }, []);
+
   const handleSendMessage = useCallback(async (content: string) => {
     setMessages((prev) => [
       ...prev,
@@ -139,16 +219,31 @@ const Index = () => {
     setIsTyping(true);
 
     try {
-      const response = await agentApi.sendMessage(content);
+      const response = await agentApi.sendMessage({
+        message: content,
+        session_id: sessionIdRef.current || undefined,
+        user_profile: { name: "Alex" },
+      });
+
+      // Store session ID for conversation continuity
+      sessionIdRef.current = response.session_id;
+
+      // Add agent response to chat
       setMessages((prev) => [
         ...prev,
         {
           id: `agent-${Date.now()}`,
-          content: response,
+          content: response.response,
           sender: "agent" as const,
           timestamp: new Date(),
         },
       ]);
+
+      // Process any actions from the agent
+      if (response.actions && response.actions.length > 0) {
+        response.actions.forEach(processAction);
+      }
+
     } catch (error) {
       console.error("Failed to send message:", error);
       setMessages((prev) => [
@@ -163,7 +258,7 @@ const Index = () => {
     } finally {
       setIsTyping(false);
     }
-  }, []);
+  }, [processAction]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -185,9 +280,9 @@ const Index = () => {
               
               {/* User Goals List */}
               <div className="mb-6 space-y-2">
-                {userGoals.map((item) => (
+                {goals.map((item) => (
                   <div key={item.id} className="flex items-center gap-3 text-foreground">
-                    <span className="text-primary font-bold">•</span>
+                    <span className="text-lg">{item.emoji}</span>
                     <span className="text-base sm:text-lg font-medium">{item.goal}</span>
                   </div>
                 ))}

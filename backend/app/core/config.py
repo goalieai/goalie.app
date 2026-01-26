@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     # API Keys
     google_api_key: str = ""
     opik_api_key: str = ""
+    supabase_url: str = ""
+    supabase_key: str = ""
+    openai_api_key: str = ""
 
     # ==========================================================================
     # LLM Model Configuration
@@ -17,12 +20,14 @@ class Settings(BaseSettings):
     # ==========================================================================
 
     # Primary model (used first)
-    llm_primary_model: str = "gemini-2.5-flash"
+    llm_primary_model: str = "gemini-3-flash-preview"
     llm_primary_temperature: float = 0.0
     llm_primary_max_retries: int = 1
 
     # Fallback model (used when primary hits rate limit)
-    llm_fallback_model: str = "	gemini-1.5-flash"
+    # Using Ollama for local inference (no rate limits!)
+    # Format: "ollama:model_name" - e.g. ollama:llama3.2:1b, ollama:gemma2:2b
+    llm_fallback_model: str = "ollama:llama3.2:1b"
     llm_fallback_temperature: float = 0.0
     llm_fallback_max_retries: int = 2
 

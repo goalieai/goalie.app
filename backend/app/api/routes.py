@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -22,6 +22,9 @@ class UnifiedChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         default=None, description="Session ID for conversation continuity"
     )
+    user_id: Optional[str] = Field(
+        default=None, description="Optional user ID for persistent storage in Supabase"
+    )
     user_profile: Optional[dict] = Field(
         default=None,
         description="User profile with name and anchors",
@@ -37,6 +40,13 @@ class ProgressResponse(BaseModel):
     percentage: float
 
 
+class ActionPayload(BaseModel):
+    """Payload for an action to be performed by the frontend."""
+
+    type: Literal["create_task", "complete_task", "create_goal", "update_task"]
+    data: dict
+
+
 class UnifiedChatResponse(BaseModel):
     """Response from the unified chat endpoint."""
 
@@ -45,6 +55,7 @@ class UnifiedChatResponse(BaseModel):
     response: str
     plan: Optional[dict] = None
     progress: Optional[ProgressResponse] = None
+    actions: List[ActionPayload] = []
 
 
 @router.post("/chat", response_model=UnifiedChatResponse)
@@ -79,6 +90,7 @@ async def chat(request: UnifiedChatRequest):
         result = await run_orchestrator(
             message=request.message,
             session_id=session_id,
+            user_id=request.user_id,
             user_profile=user_profile,
         )
 
@@ -93,6 +105,7 @@ async def chat(request: UnifiedChatRequest):
                 if result.get("progress")
                 else None
             ),
+            actions=result.get("actions", []),
         )
 
         return response

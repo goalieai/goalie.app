@@ -29,3 +29,4 @@ class AgentState(TypedDict):
 
     # Final response
     response: Optional[str]
+    actions: Optional[List[dict]]
