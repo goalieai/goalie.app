@@ -1,6 +1,9 @@
-import { useState, useCallback, useRef } from "react";
-import { Clock, Trophy, MessageCircle, X, Medal } from "lucide-react";
+import { useState, useCallback, useRef, useMemo } from "react";
+import { Clock, MessageCircle, X, Medal } from "lucide-react";
 import { agentApi, Action } from "@/services/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTasks, useCompleteTask } from "@/hooks/useTasks";
+import { useGoals } from "@/hooks/useGoals";
 import DashboardHeader from "@/components/DashboardHeader";
 import TaskCard from "@/components/TaskCard";
 import SectionHeader from "@/components/SectionHeader";
@@ -8,28 +11,22 @@ import AgentFeedback from "@/components/AgentFeedback";
 import AgentChat from "@/components/AgentChat";
 import MedalTask from "@/components/MedalTask";
 import MotivationalQuote from "@/components/MotivationalQuote";
+import AddTaskForm from "@/components/AddTaskForm";
+import AddGoalForm from "@/components/AddGoalForm";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import goalieLogo from "@/assets/goalie-logo.jpeg";
 
-// Initial goals data
+// Initial goals data (fallback)
 const initialGoals = [
-  { id: "g1", goal: "Learn Spanish", emoji: "🇪🇸" },
-  { id: "g2", goal: "Go to the gym", emoji: "💪" },
-  { id: "g3", goal: "Read 20 pages daily", emoji: "📚" },
+  { id: "g1", title: "Learn Spanish", emoji: "🇪🇸" },
 ];
 
-// Sample data
-const initialTasks = {
-  now: { id: "1", action: "Write project proposal draft", time: "9:00 AM - 10:30 AM" },
-  next: [
-    { id: "2", action: "Review team feedback", time: "11:00 AM" },
-    { id: "3", action: "Prepare presentation slides", time: "2:00 PM" },
-  ],
-  achieved: [
-    { id: "4", action: "Morning meditation", time: "7:30 AM" },
-    { id: "5", action: "Check emails", time: "8:00 AM" },
-  ],
+// Sample data (fallback)
+const initialTasksMock = {
+  now: null,
+  next: [],
+  achieved: [],
 };
 
 const initialSuggestions = [
@@ -62,8 +59,13 @@ const initialMessages: Message[] = [
 ];
 
 const Index = () => {
-  const [tasks, setTasks] = useState(initialTasks);
-  const [goals, setGoals] = useState(initialGoals);
+  // Queries
+  const { data: tasksData } = useTasks();
+  const { data: goalsData, isLoading: isLoadingGoals } = useGoals();
+  const completeTask = useCompleteTask();
+  const queryClient = useQueryClient();
+
+  // Local state for UI only
   const [suggestions, setSuggestions] = useState(initialSuggestions);
   const [messages, setMessages] = useState(initialMessages);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -72,6 +74,45 @@ const Index = () => {
   // Session management for conversation continuity
   const sessionIdRef = useRef<string | null>(null);
 
+  // Derived state for Tasks
+  const tasks = useMemo(() => {
+    if (!tasksData) return initialTasksMock;
+
+    // Map tasks to UI format
+    const achieved = tasksData
+      .filter((t) => t.status === "completed")
+      .map((t) => ({
+        id: t.id,
+        action: t.task_name,
+        time: t.scheduled_text || new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+
+    const pending = tasksData.filter((t) => t.status !== "completed");
+
+    // Simple logic: First pending task is 'now', rest are 'next'
+    // Future: Use 'scheduled_at' to sort
+    const nowTask = pending.length > 0 ? pending[0] : null;
+
+    const now = nowTask ? {
+      id: nowTask.id,
+      action: nowTask.task_name,
+      time: nowTask.scheduled_text || "Now"
+    } : null;
+
+    const next = pending.length > 1 ? pending.slice(1).map((t) => ({
+      id: t.id,
+      action: t.task_name,
+      time: t.scheduled_text || "Later"
+    })) : [];
+
+    return { now, next, achieved };
+  }, [tasksData]);
+
+  // Derived state for Goals
+  const goals = useMemo(() => {
+    return goalsData || initialGoals;
+  }, [goalsData]);
+
   const currentDate = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -79,21 +120,13 @@ const Index = () => {
   });
 
   const completedCount = tasks.achieved.length;
-  const totalCount = 1 + tasks.next.length + tasks.achieved.length;
+  const totalCount = (tasks.now ? 1 : 0) + tasks.next.length + tasks.achieved.length;
 
   const handleCompleteNow = useCallback(() => {
     if (tasks.now) {
-      setTasks((prev) => ({
-        ...prev,
-        achieved: [
-          { ...prev.now!, time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-          ...prev.achieved,
-        ],
-        now: prev.next[0] || null,
-        next: prev.next.slice(1),
-      }));
+      completeTask.mutate(tasks.now.id);
 
-      // Agent celebrates
+      // Agent celebrates (optimistic UI update via React Query invalidation in background)
       setTimeout(() => {
         setMessages((prev) => [
           ...prev,
@@ -106,7 +139,7 @@ const Index = () => {
         ]);
       }, 500);
     }
-  }, [tasks]);
+  }, [tasks.now, completeTask]);
 
   const handleReplanNow = useCallback(() => {
     setMessages((prev) => [
@@ -131,79 +164,22 @@ const Index = () => {
 
   // Process actions returned by the AI agent
   const processAction = useCallback((action: Action) => {
-    const { type, data } = action;
+    const { type } = action;
 
     switch (type) {
-      case "create_task": {
-        const newTask = {
-          id: `task-${Date.now()}`,
-          action: (data.action as string) || (data.task_name as string) || "New task",
-          time: (data.time as string) || (data.scheduled_time as string) || "Anytime",
-        };
-        setTasks((prev) => ({
-          ...prev,
-          next: [...prev.next, newTask],
-        }));
-        break;
-      }
-
-      case "complete_task": {
-        const taskId = data.task_id as string;
-        const taskName = data.task_name as string;
-        setTasks((prev) => {
-          // Find task by ID or name
-          const findTask = (t: { id: string; action: string }) =>
-            t.id === taskId || t.action.toLowerCase().includes((taskName || "").toLowerCase());
-
-          // Check if it's the current task
-          if (prev.now && findTask(prev.now)) {
-            return {
-              ...prev,
-              achieved: [
-                { ...prev.now, time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-                ...prev.achieved,
-              ],
-              now: prev.next[0] || null,
-              next: prev.next.slice(1),
-            };
-          }
-
-          // Check in next tasks
-          const taskIndex = prev.next.findIndex(findTask);
-          if (taskIndex !== -1) {
-            const completedTask = prev.next[taskIndex];
-            return {
-              ...prev,
-              achieved: [
-                { ...completedTask, time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) },
-                ...prev.achieved,
-              ],
-              next: prev.next.filter((_, i) => i !== taskIndex),
-            };
-          }
-
-          return prev;
-        });
+      case "create_task":
+      case "complete_task":
+      case "update_task": {
+        queryClient.invalidateQueries({ queryKey: ["tasks"] });
         break;
       }
 
       case "create_goal": {
-        const newGoal = {
-          id: `goal-${Date.now()}`,
-          goal: (data.goal as string) || "New goal",
-          emoji: (data.emoji as string) || "🎯",
-        };
-        setGoals((prev) => [...prev, newGoal]);
-        break;
-      }
-
-      case "update_task": {
-        // Future: handle task updates
-        console.log("update_task action:", data);
+        queryClient.invalidateQueries({ queryKey: ["goals"] });
         break;
       }
     }
-  }, []);
+  }, [queryClient]);
 
   const handleSendMessage = useCallback(async (content: string) => {
     setMessages((prev) => [
@@ -277,18 +253,29 @@ const Index = () => {
             {/* NOW Section - Your Goalie Goals */}
             <section className="section-now rounded-2xl border-2 p-4 sm:p-6 lg:p-8">
               <h2 className="text-2xl sm:text-3xl font-bold text-primary mb-4">YOUR GOALIE</h2>
-              
+
               {/* User Goals List */}
               <div className="mb-6 space-y-2">
-                {goals.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 text-foreground">
-                    <span className="text-lg">{item.emoji}</span>
-                    <span className="text-base sm:text-lg font-medium">{item.goal}</span>
-                  </div>
-                ))}
+                {isLoadingGoals ? (
+                  <div className="text-muted-foreground">Loading goals...</div>
+                ) : (
+                  goals.map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 text-foreground">
+                      <span className="text-lg">{item.emoji}</span>
+                      <span className="text-base sm:text-lg font-medium">{item.title}</span>
+                    </div>
+                  ))
+                )}
+                {/* Fallback for empty state if not loading */}
+                {!isLoadingGoals && goals.length === 0 && (
+                  <p className="text-muted-foreground italic">No goals yet. Add one!</p>
+                )}
+                <div className="pt-2">
+                  <AddGoalForm />
+                </div>
               </div>
 
-              {tasks.now && (
+              {tasks.now ? (
                 <TaskCard
                   action={tasks.now.action}
                   time={tasks.now.time}
@@ -296,17 +283,24 @@ const Index = () => {
                   onComplete={handleCompleteNow}
                   onReplan={handleReplanNow}
                 />
+              ) : (
+                <div className="p-4 bg-muted/20 rounded-lg text-center text-muted-foreground">
+                  No task scheduled for now. Take a break!
+                </div>
               )}
             </section>
 
             {/* NEXT Section - Preparation */}
             <section className="section-next rounded-2xl border-2 p-4 sm:p-6 lg:p-8">
-              <SectionHeader
-                icon={Clock}
-                title="Next"
-                subtitle="Coming up"
-                variant="next"
-              />
+              <div className="flex justify-between items-center mb-4">
+                <SectionHeader
+                  icon={Clock}
+                  title="Next"
+                  subtitle="Coming up"
+                  variant="next"
+                />
+                <AddTaskForm />
+              </div>
               <MedalTask task="Morning Meditation" completed className="mb-4" />
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
                 {tasks.next.map((task) => (
@@ -314,8 +308,8 @@ const Index = () => {
                     key={task.id}
                     action={task.action}
                     time={task.time}
-                    onComplete={() => {}}
-                    onReplan={() => {}}
+                    onComplete={() => completeTask.mutate(task.id)}
+                    onReplan={() => { }}
                   />
                 ))}
               </div>
@@ -338,7 +332,7 @@ const Index = () => {
                   <p className="text-sm sm:text-base text-muted-foreground font-medium">{completedCount} tasks completed today!</p>
                 </div>
               </div>
-              
+
               <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {tasks.achieved.map((task) => (
                   <TaskCard
@@ -346,8 +340,8 @@ const Index = () => {
                     action={task.action}
                     time={task.time}
                     completed
-                    onComplete={() => {}}
-                    onReplan={() => {}}
+                    onComplete={() => { }}
+                    onReplan={() => { }}
                   />
                 ))}
               </div>
