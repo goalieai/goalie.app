@@ -1,128 +1,112 @@
-# Goally Frontend
+# Frontend Guide - Goally
 
-ADHD-friendly productivity app for managing New Year's resolutions through objective breakdown and micro-task management.
+## Overview
+
+Goally's frontend is a **React 19** Single Page Application (SPA) built with **Vite** and **TypeScript**. It features a modern, accessible UI using **Radix UI** primitives and **Tailwind CSS**.
 
 ## Tech Stack
 
-- **Framework:** React 19 + TypeScript 5.9
-- **Build Tool:** Vite 7
-- **Router:** React Router DOM 7
-- **Styling:** Tailwind CSS 3.4 + tailwindcss-animate
-- **Components:** Radix UI primitives
-- **Icons:** Lucide React
-- **Data Fetching:** TanStack React Query 5
-- **Notifications:** Sonner + custom toast hook
-- **Theme:** next-themes (dark mode support)
+- **Core**: React 19 + TypeScript 5.9
+- **Build**: Vite 7
+- **Routing**: React Router DOM 7
+- **Styling**: Tailwind CSS 3.4 + `tailwindcss-animate`
+- **UI Components**: Radix UI (Headless accessible components)
+- **State/Fetching**: TanStack React Query 5
+- **Icons**: Lucide React
+- **Notifications**: Sonner
 
 ## Project Structure
 
 ```
 src/
-├── pages/              # Route-level components
-│   ├── Index.tsx       # Main dashboard
-│   └── NotFound.tsx    # 404 page
+├── pages/
+│   ├── Index.tsx            # Main Dashboard (Split view: Tasks + Agent)
+│   └── NotFound.tsx         # 404 Route
 ├── components/
-│   ├── goalie/         # Domain-specific components
-│   │   ├── AddObjectiveModal.tsx
-│   │   ├── CurrentFocus.tsx
-│   │   ├── DashboardHeader.tsx
-│   │   ├── ObjectiveProgress.tsx
-│   │   ├── ReplanCard.tsx
-│   │   └── UpcomingTasks.tsx
-│   └── ui/             # Reusable Radix-based UI components
-├── hooks/              # Custom React hooks
-│   ├── use-toast.ts    # Toast state management
-│   └── use-mobile.tsx  # Mobile viewport detection
+│   ├── ui/                  # Reusable Design System (Button, Card, Input...)
+│   ├── AgentChat.tsx        # AI Chat Interface
+│   ├── TaskCard.tsx         # Micro-task display & management
+│   ├── DashboardHeader.tsx  # User greeting & stats
+│   ├── AddTaskForm.tsx      # Task creation modal
+│   ├── AddGoalForm.tsx      # High-level goal creation
+│   └── ...                  # Other domain components
+├── services/
+│   ├── api.ts               # Typed API client (Tasks, Goals, Agent)
+│   └── storage.ts           # Local storage wrappers
+├── hooks/
+│   ├── use-toast.ts         # Toast notification hook
+│   └── use-mobile.tsx       # Viewport detection
 ├── lib/
-│   └── utils.ts        # cn() class name utility
+│   └── utils.ts             # Tailwind merging utility (cn)
 ├── types/
-│   └── goalie.ts       # TypeScript interfaces
-└── assets/             # Images and static files
+│   └── database.ts          # Shared types (mirrors backend schemas)
+└── assets/                  # Static assets
 ```
 
-## Commands
+## Workflows
 
-```bash
-npm run dev      # Start dev server (port 5173)
-npm run build    # TypeScript check + production build
-npm run lint     # Run ESLint
-npm run preview  # Preview production build
-```
+### 1. Agent Interaction
+- **Component**: `AgentChat.tsx`
+- **Flow**: User types message -> `agentApi.sendMessage` -> Updates chat history -> Handles "Actions" (create/update tasks) returned by agent.
 
-## Key Types
+### 2. Task Management
+- **Components**: `UpcomingTasks.tsx`, `TaskCard.tsx`
+- **State**: React Query (`useQuery(['tasks'])`).
+- **Updates**: Optimistic updates using mutation triggers (`taskApi`).
+
+## Services & API (`src/services/api.ts`)
+
+The `api` module provides typed functions for backend interaction:
 
 ```typescript
-interface MicroTask {
-  id: string;
-  title: string;
-  estimatedMinutes: number;
-  scheduledTime?: string;
-  status: 'pending' | 'in-progress' | 'completed' | 'replanning';
-  suggestedNewTime?: string;
-}
+// Agent
+agentApi.sendMessage(request: ChatRequest): Promise<ChatResponse>
 
-interface Objective {
-  id: string;
-  title: string;
-  emoji: string;
-  progress: number;
-  microTasks: MicroTask[];
-  dueDate?: string;
-}
+// Resources
+taskApi.getAll(userId): Promise<Task[]>
+taskApi.create(data): Promise<Task>
+goalApi.getAll(userId): Promise<Goal[]>
 ```
 
 ## Styling System
 
-### Design Tokens (index.css)
+Tailwind is configured with a custom theme in `tailwind.config.ts`.
 
-- **Primary (Coral):** `hsl(8 75% 65%)` - CTAs, active states
-- **Secondary (Cyan):** `hsl(195 85% 50%)` - Calm, verified
-- **Success:** `hsl(155 65% 45%)` - Completed tasks
-- **Replan:** `hsl(38 90% 55%)` - Adaptive state
+### Key Colors (HSL)
+- **Primary (Coral)**: `hsl(8 75% 65%)` - Actions, Highlights
+- **Secondary (Cyan)**: `hsl(195 85% 50%)` - Info, Calm
+- **Success**: `hsl(155 65% 45%)` - Completion
+- **Background**: `hsl(0 0% 100%)` / `hsl(222 47% 11%)` (Dark mode)
 
-### Fonts
+### Patterns
+- **Glassmorphism**: `.glass-card` utility.
+- **Micro-interactions**: `.animate-scale-in`, `.animate-fade-in`.
 
-- **Body:** Nunito (400-800)
-- **Display:** Space Grotesk (400-700)
+## Commands
 
-### Custom Utilities
+```bash
+# Development Server
+npm run dev
 
-- `.gradient-coral`, `.gradient-cyan`, `.gradient-success`
-- `.glass-card` - Glassmorphism effect
-- `.animate-pulse-soft`, `.animate-slide-up`, `.animate-bounce-soft`
+# Build for Production
+npm run build
 
-## Component Patterns
+# Preview Production Build
+npm run preview
 
-### UI Components (CVA pattern)
-
-```typescript
-const buttonVariants = cva(baseStyles, {
-  variants: { variant: {...}, size: {...} }
-})
+# Linting
+npm run lint
 ```
 
-### Path Alias
+## Environment Variables (.env)
 
-`@/` maps to `./src/` in imports.
+| Variable | Description |
+|----------|-------------|
+| `VITE_API_BASE_URL` | Implementation URL for backend (default: `http://localhost:8000`) |
 
-## Conventions
+## Guidelines
 
-- **Components:** PascalCase (`AddObjectiveModal.tsx`)
-- **Hooks:** camelCase with `use` prefix (`useToast`)
-- **Types:** PascalCase interfaces
-- **Handlers:** camelCase (`handleCompleteTask`)
-
-## Environment Variables
-
-```
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-## Backend Integration
-
-The frontend is prepared for FastAPI backend connection:
-
-1. Create `src/services/` for API clients
-2. Use TanStack React Query for server state
-3. Extend `types/goalie.ts` with backend response types
-4. Use Sonner toast for error handling
+- **Components**: Use `src/components/ui` for primitives. Build domain components in `src/components/`.
+- **Async**: Use `useQuery` for fetching and `useMutation` for updates.
+- **Types**: Define shared data models in `src/types/`.
+- **Accessibility**: Use Radix UI primitives for complex interactive components (Dialogs, Popovers).

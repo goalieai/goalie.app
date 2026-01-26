@@ -8,14 +8,14 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | React 19 + TypeScript 5.9 + Vite 7 |
-| Styling | Tailwind CSS 3.4 + Radix UI |
-| Backend | FastAPI + LangGraph + LangChain |
-| LLM | Google Gemini |
-| Observability | Comet Opik |
-| Frontend Hosting | Vercel |
-| Backend Hosting | Google Cloud Run |
-| CI/CD | GitHub Actions |
+| **Frontend** | React 19 + TypeScript 5.9 + Vite 7 |
+| **State & Routing** | TanStack Query 5 + React Router 7 |
+| **Styling** | Tailwind CSS 3.4 + Radix UI |
+| **Backend** | FastAPI + LangGraph + LangChain |
+| **Database** | Supabase (PostgreSQL) |
+| **LLM** | Google Gemini (gemini-2.5-flash) |
+| **Observability** | Comet Opik |
+| **Hosting** | Vercel (Frontend) + Google Cloud Run (Backend) |
 
 ## Features
 
@@ -24,6 +24,7 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 - **AI Coach Chat** - Real-time motivational support and guidance
 - **Adaptive Scheduling** - Re-plan tasks based on your progress
 - **Progress Visualization** - Spiral progress tracker with completion metrics
+- **Unified Agent** - Single intent-router manages planning, coaching, and casual conversation
 
 ## Getting Started
 
@@ -32,6 +33,7 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 - Node.js 20+
 - Python 3.11+
 - Google Cloud account (for Gemini API)
+- Supabase Project
 - Comet account (for Opik)
 
 ### Frontend Setup
@@ -58,6 +60,8 @@ Create a `.env` file in the `backend/` directory:
 ```env
 GOOGLE_API_KEY=your_gemini_api_key
 OPIK_API_KEY=your_opik_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_service_key
 ```
 
 Run the server:
@@ -76,67 +80,54 @@ goally/
 │   ├── src/
 │   │   ├── pages/               # Route components
 │   │   │   ├── Index.tsx        # Main dashboard
-│   │   │   └── NotFound.tsx     # 404 page
+│   │   │   └── ...
 │   │   ├── components/
 │   │   │   ├── ui/              # Radix-based UI primitives
 │   │   │   ├── AgentChat.tsx    # AI coach sidebar
-│   │   │   ├── AgentFeedback.tsx# Contextual suggestions
 │   │   │   ├── TaskCard.tsx     # Task with actions
-│   │   │   ├── ProgressSpiral.tsx # Circular progress
-│   │   │   ├── DashboardHeader.tsx
 │   │   │   └── ...
-│   │   ├── hooks/               # Custom React hooks
-│   │   ├── lib/                 # Utilities
-│   │   └── assets/              # Images
+│   │   ├── hooks/               # React Query hooks (useTasks, useGoals)
+│   │   └── services/            # API client
 │   └── ...
 ├── backend/                     # FastAPI + LangGraph
 │   └── app/
 │       ├── api/                 # REST endpoints
-│       ├── agent/               # LangGraph workflow
-│       └── core/                # Configuration
-└── .github/workflows/           # CI/CD pipelines
+│       ├── agent/               # LangGraph workflow (Orchestrator)
+│       ├── core/                # Configuration & Supabase
+│       └── ...
+└── ...
 ```
 
 ## API Endpoints
 
+### Agent
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/chat` | Send message to agent |
-| GET | `/api/health` | Health check |
+| POST | `/api/chat` | Send message to agent (handles planning & coaching) |
+| POST | `/api/plan` | Run planning pipeline directly |
+
+### Resources (CRUD)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tasks` | List user tasks |
+| POST | `/api/tasks` | Create task |
+| GET | `/api/goals` | List user goals |
+| POST | `/api/goals` | Create goal |
+| GET | `/api/profile/{id}` | Get user profile |
 
 ## Deployment
 
 ### Frontend (Vercel)
 
-The frontend auto-deploys to Vercel on push to `main`. Configure these secrets in GitHub:
-
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+The frontend auto-deploys to Vercel on push to `main`. Configure `VITE_API_BASE_URL` if needed.
 
 ### Backend (Google Cloud Run)
 
-The backend auto-deploys to Cloud Run on push to `main`. Configure these secrets:
-
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_SERVICE_ACCOUNT`
-- `GOOGLE_API_KEY`
-- `OPIK_API_KEY`
+The backend auto-deploys to Cloud Run on push to `main`. Requires GCP Service Account and all environment variables configured.
 
 ## Observability
 
-This project uses [Comet Opik](https://www.comet.com/site/products/opik/) for LLM observability. All LangGraph operations are automatically traced.
-
-View traces at: https://www.comet.com/opik
-
-## Design Philosophy
-
-Goally is designed with ADHD-friendly principles:
-
-- **Miller's Law** - Maximum 3+1 sections (NOW, NEXT, ACHIEVED)
-- **Fitts' Law** - Large touch targets (56-64px buttons)
-- **Immediate Feedback** - Visual celebration on task completion
-- **Micro-tasks** - Small, achievable chunks with time estimates
+This project uses [Comet Opik](https://www.comet.com/site/products/opik/) for LLM observability. All LangGraph operations are automatically traced, allowing you to debug agent reasoning and tool usage.
 
 ## License
 
