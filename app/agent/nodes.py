@@ -374,14 +374,12 @@ async def planning_response_node(state: AgentState) -> dict:
     tasks_formatted = []
     anchor_emojis = {
         "morning": "sunrise",
-        "mañana": "sunrise",
         "coffee": "sunrise",
         "lunch": "sunny",
-        "mediodía": "sunny",
+        "midday": "sunny",
         "afternoon": "sunny",
         "evening": "crescent_moon",
         "night": "crescent_moon",
-        "noche": "crescent_moon",
         "end of day": "crescent_moon",
     }
 
@@ -408,7 +406,7 @@ Tasks:
 
 {plan_summary}
 
-Present this plan to the user in a friendly, encouraging way. Use their language (Spanish if they wrote in Spanish)."""
+Present this plan to the user in a friendly, encouraging way."""
 
     messages = [
         SystemMessage(content=system_prompt),

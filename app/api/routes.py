@@ -145,14 +145,14 @@ async def chat(request: UnifiedChatRequest):
 # Map node names to step IDs and user-facing messages
 NODE_TO_STEP = {
     # Orchestrator nodes
-    "intent_router": ("intent", "Entendiendo tu intención..."),
-    "casual": ("response", "Pensando..."),
-    "coaching": ("response", "Revisando tu progreso..."),
-    "planning_response": ("response", "Preparando tu plan..."),
+    "intent_router": ("intent", "Understanding your intent..."),
+    "casual": ("response", "Thinking..."),
+    "coaching": ("response", "Reviewing your progress..."),
+    "planning_response": ("response", "Preparing your plan..."),
     # Planning subgraph nodes
-    "smart_refiner": ("smart", "Refinando objetivo SMART..."),
-    "task_splitter": ("tasks", "Dividiendo en micro-tareas..."),
-    "context_matcher": ("schedule", "Asignando a tu agenda..."),
+    "smart_refiner": ("smart", "Refining SMART goal..."),
+    "task_splitter": ("tasks", "Breaking into micro-tasks..."),
+    "context_matcher": ("schedule", "Assigning to your schedule..."),
 }
 
 

@@ -8,8 +8,8 @@ Create a new task for the user in their task list.
 
 ## Examples
 
-User: "Añade una tarea para estudiar español"  
-→ create_task(action="Estudiar español")
+User: "Add a task to study Spanish"
+→ create_task(action="Study Spanish")
 
 User: "Remind me to call mom at 5pm"  
 → create_task(action="Call mom", time="5:00 PM")
