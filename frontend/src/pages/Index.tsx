@@ -325,8 +325,8 @@ const Index = () => {
               </div>
             </section>
 
-            {/* ACHIEVED Section - Dopamine */}
-            <section className="section-achieved rounded-2xl border-2 p-4 sm:p-6 lg:p-8 bg-gradient-to-br from-primary/10 via-warning/10 to-primary/5">
+            {/* ACHIEVED Section - Gamified Dopamine Rush */}
+            <section className="rounded-2xl border-2 border-primary/50 p-4 sm:p-6 lg:p-8 bg-gradient-to-br from-primary/40 via-warning/30 to-primary/20 shadow-lg">
               {/* Logo + Medal Header */}
               <div className="flex items-center gap-4 mb-6">
                 <div className="relative">

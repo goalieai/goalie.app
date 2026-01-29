@@ -16,7 +16,7 @@ const SectionHeader = ({ icon: Icon, title, subtitle, variant }: SectionHeaderPr
           "rounded-xl p-2.5",
           variant === "now" && "bg-primary/10 text-primary",
           variant === "next" && "bg-accent text-accent-foreground",
-          variant === "achieved" && "bg-warning/10 text-warning"
+          variant === "achieved" && "bg-achieved text-achieved-border"
         )}
       >
         <Icon className="w-5 h-5" />

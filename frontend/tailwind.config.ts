@@ -76,6 +76,10 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        achieved: {
+          DEFAULT: "hsl(var(--achieved-bg))",
+          border: "hsl(var(--achieved-border))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
