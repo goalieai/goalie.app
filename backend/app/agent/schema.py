@@ -16,7 +16,7 @@ class UserProfile(BaseModel):
 class IntentClassification(BaseModel):
     """Output of the Intent Router node."""
 
-    intent: Literal["casual", "planning", "coaching", "modify"] = Field(
+    intent: Literal["casual", "planning", "coaching", "modify", "confirm"] = Field(
         description="The classified user intent"
     )
     confidence: float = Field(

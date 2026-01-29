@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { Clock, MessageCircle, X, Medal } from "lucide-react";
-import { taskApi, goalApi, Action } from "@/services/api";
+import { Action } from "@/services/api";
+import { getStore } from "@/services/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks, useCompleteTask } from "@/hooks/useTasks";
@@ -132,22 +133,17 @@ const Index = () => {
   }, []);
 
   // Process actions returned by the AI agent
+  // Uses the unified store (localStorage for guests, Supabase for authenticated)
   const processAction = useCallback(async (action: Action) => {
     const { type, data } = action;
-    const userId = user?.id;
-
-    // Guest users can't persist to database
-    if (!userId) {
-      console.log("[Action] Skipping action for guest user:", type);
-      return;
-    }
+    const userId = user?.id ?? null;
+    const store = getStore(userId);
 
     try {
       switch (type) {
         case "create_task": {
-          console.log("[Action] Creating task:", data);
-          await taskApi.create({
-            user_id: userId,
+          console.log("[Action] Creating task:", data, "userId:", userId ?? "guest");
+          await store.tasks.create({
             task_name: (data.task_name || data.action) as string,
             estimated_minutes: (data.estimated_minutes as number) || 15,
             energy_required: (data.energy_required as "high" | "medium" | "low") || "medium",
@@ -162,17 +158,16 @@ const Index = () => {
         case "complete_task": {
           const taskId = data.task_id as string;
           if (taskId) {
-            await taskApi.complete(taskId, userId);
+            await store.tasks.complete(taskId);
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
           }
           break;
         }
 
         case "create_goal": {
-          console.log("[Action] Creating goal:", data);
-          await goalApi.create({
-            user_id: userId,
-            title: data.goal as string,
+          console.log("[Action] Creating goal:", data, "userId:", userId ?? "guest");
+          await store.goals.create({
+            title: (data.title || data.goal) as string,
             emoji: (data.emoji as string) || "🎯",
           });
           queryClient.invalidateQueries({ queryKey: ["goals"] });
@@ -181,6 +176,14 @@ const Index = () => {
 
         case "update_task": {
           queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          break;
+        }
+
+        case "refresh_ui": {
+          // Refresh all queries to sync UI with storage
+          console.log("[Action] Refreshing UI");
+          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          queryClient.invalidateQueries({ queryKey: ["goals"] });
           break;
         }
       }
