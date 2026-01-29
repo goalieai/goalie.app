@@ -3,6 +3,8 @@ import { Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
+import PipelineProgress from "@/components/PipelineProgress";
+import { PipelineStep, StreamProgress } from "@/hooks/useStreamingChat";
 
 interface Message {
   id: string;
@@ -11,13 +13,22 @@ interface Message {
   timestamp: Date;
 }
 
+interface StreamingState {
+  isStreaming: boolean;
+  status: string | null;
+  currentStep: PipelineStep | null;
+  completedSteps: PipelineStep[];
+  progress: StreamProgress;
+}
+
 interface AgentChatProps {
   messages: Message[];
   onSendMessage: (message: string) => void;
   isTyping?: boolean;
+  streamingState?: StreamingState;
 }
 
-const AgentChat = ({ messages, onSendMessage, isTyping = false }: AgentChatProps) => {
+const AgentChat = ({ messages, onSendMessage, isTyping = false, streamingState }: AgentChatProps) => {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +137,22 @@ const AgentChat = ({ messages, onSendMessage, isTyping = false }: AgentChatProps
           </div>
         ))}
 
-        {isTyping && (
+        {/* Streaming pipeline progress */}
+        {streamingState?.isStreaming && (
+          <div className="flex justify-start animate-fade-in">
+            <div className="agent-bubble rounded-2xl rounded-bl-md px-4 py-4 w-full max-w-[95%]">
+              <PipelineProgress
+                currentStep={streamingState.currentStep}
+                completedSteps={streamingState.completedSteps}
+                progress={streamingState.progress}
+                status={streamingState.status}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Fallback typing indicator (non-streaming) */}
+        {isTyping && !streamingState?.isStreaming && (
           <div className="flex justify-start">
             <div className="agent-bubble rounded-2xl rounded-bl-md px-4 py-3">
               <div className="flex gap-1.5">

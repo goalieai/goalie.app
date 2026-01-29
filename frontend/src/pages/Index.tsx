@@ -1,10 +1,11 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { Clock, MessageCircle, X, Medal } from "lucide-react";
-import { agentApi, taskApi, goalApi, Action } from "@/services/api";
+import { taskApi, goalApi, Action } from "@/services/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks, useCompleteTask } from "@/hooks/useTasks";
 import { useGoals } from "@/hooks/useGoals";
+import { useStreamingChat } from "@/hooks/useStreamingChat";
 import DashboardHeader from "@/components/DashboardHeader";
 import TaskCard from "@/components/TaskCard";
 import SectionHeader from "@/components/SectionHeader";
@@ -43,7 +44,9 @@ const Index = () => {
   // Local state for UI only
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
+
+  // Streaming chat hook
+  const streaming = useStreamingChat();
 
   // Session management for conversation continuity
   const sessionIdRef = useRef<string | null>(null);
@@ -186,7 +189,48 @@ const Index = () => {
     }
   }, [queryClient, user?.id]);
 
+  // Handle streaming result when it arrives
+  useEffect(() => {
+    if (streaming.result) {
+      // Store session ID for conversation continuity
+      sessionIdRef.current = streaming.result.session_id;
+
+      // Add agent response to chat
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agent-${Date.now()}`,
+          content: streaming.result!.response,
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+
+      // Process any actions from the agent
+      if (streaming.result.actions && streaming.result.actions.length > 0) {
+        console.log("[Agent] Processing actions:", streaming.result.actions.length);
+        Promise.all(streaming.result.actions.map(processAction));
+      }
+    }
+  }, [streaming.result, processAction]);
+
+  // Handle streaming errors
+  useEffect(() => {
+    if (streaming.error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agent-${Date.now()}`,
+          content: "Sorry, I'm having trouble connecting. Please try again.",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+    }
+  }, [streaming.error]);
+
   const handleSendMessage = useCallback(async (content: string) => {
+    // Add user message to chat
     setMessages((prev) => [
       ...prev,
       {
@@ -197,53 +241,16 @@ const Index = () => {
       },
     ]);
 
-    setIsTyping(true);
-
-    try {
-      const response = await agentApi.sendMessage({
-        message: content,
-        session_id: sessionIdRef.current || undefined,
-        user_id: user?.id,
-        user_profile: {
-          name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
-        },
-      });
-
-      // Store session ID for conversation continuity
-      sessionIdRef.current = response.session_id;
-
-      // Add agent response to chat
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `agent-${Date.now()}`,
-          content: response.response,
-          sender: "agent" as const,
-          timestamp: new Date(),
-        },
-      ]);
-
-      // Process any actions from the agent
-      if (response.actions && response.actions.length > 0) {
-        console.log("[Agent] Processing actions:", response.actions.length);
-        await Promise.all(response.actions.map(processAction));
-      }
-
-    } catch (error) {
-      console.error("Failed to send message:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `agent-${Date.now()}`,
-          content: "Sorry, I'm having trouble connecting. Please try again.",
-          sender: "agent" as const,
-          timestamp: new Date(),
-        },
-      ]);
-    } finally {
-      setIsTyping(false);
-    }
-  }, [processAction, isGuest, user]);
+    // Send via streaming endpoint
+    await streaming.sendMessage({
+      message: content,
+      session_id: sessionIdRef.current || undefined,
+      user_id: user?.id,
+      user_profile: {
+        name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
+      },
+    });
+  }, [streaming, isGuest, user]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -379,7 +386,13 @@ const Index = () => {
             <AgentChat
               messages={messages}
               onSendMessage={handleSendMessage}
-              isTyping={isTyping}
+              streamingState={{
+                isStreaming: streaming.isStreaming,
+                status: streaming.status,
+                currentStep: streaming.currentStep,
+                completedSteps: streaming.completedSteps,
+                progress: streaming.progress,
+              }}
             />
           </div>
         </aside>
