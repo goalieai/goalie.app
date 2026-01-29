@@ -14,7 +14,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 // =============================================================================
 
 export interface Action {
-  type: "create_task" | "complete_task" | "create_goal" | "update_task";
+  type: "create_task" | "complete_task" | "create_goal" | "update_task" | "refresh_ui";
   data: Record<string, unknown>;
 }
 
@@ -41,7 +41,7 @@ export interface Plan {
 
 export interface ChatResponse {
   session_id: string;
-  intent_detected: "casual" | "planning" | "coaching" | "modify" | "unknown";
+  intent_detected: "casual" | "planning" | "coaching" | "modify" | "confirm" | "unknown";
   response: string;
   plan?: Plan;
   progress?: Progress;
