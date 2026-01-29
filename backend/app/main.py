@@ -12,6 +12,8 @@ if settings.opik_api_key:
     except Exception as e:
         print(f"Opik initialization skipped: {e}")
 
+print("STARTING APP - VERSION: CORS_FIX_V2_NO_REGEX")
+
 app = FastAPI(
     title="Goally API",
     description="AI agent to help achieve New Year's resolutions",
@@ -26,8 +28,6 @@ app.add_middleware(
         "https://goalie-app.vercel.app",
         "https://goalie-app-git-main-goalieais-projects.vercel.app",
         "https://goalie-iycetyrnb-goalieais-projects.vercel.app",
-    ],
-    allow_origin_regex=r"https://goalie-app.*\.vercel\.app|http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
