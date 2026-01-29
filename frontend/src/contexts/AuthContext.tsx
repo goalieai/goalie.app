@@ -7,7 +7,7 @@ import {
     ReactNode,
 } from "react";
 import { User, AuthError } from "@supabase/supabase-js";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { storageApi } from "@/services/storage";
 
 interface AuthContextType {
