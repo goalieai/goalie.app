@@ -283,18 +283,18 @@ export function useStreamingChat(): UseStreamingChatReturn {
                   }
                 }
                 // Also check by message content
-                if (event.message.includes("intención") || event.message.includes("intent")) {
+                if (event.message.includes("intent") || event.message.includes("Understanding")) {
                   setCompletedSteps((prev) =>
                     prev.includes("intent") ? prev : [...prev, "intent"]
                   );
                   setCurrentStep("smart");
-                } else if (event.message.includes("SMART") || event.message.includes("Refinando")) {
+                } else if (event.message.includes("SMART") || event.message.includes("Refining")) {
                   setCurrentStep("smart");
-                } else if (event.message.includes("micro-tareas") || event.message.includes("Dividiendo")) {
+                } else if (event.message.includes("micro-tasks") || event.message.includes("Breaking")) {
                   setCurrentStep("tasks");
-                } else if (event.message.includes("agenda") || event.message.includes("Asignando")) {
+                } else if (event.message.includes("Scheduling") || event.message.includes("schedule")) {
                   setCurrentStep("schedule");
-                } else if (event.message.includes("plan") || event.message.includes("Preparando")) {
+                } else if (event.message.includes("plan") || event.message.includes("Preparing")) {
                   setCurrentStep("response");
                 }
               }

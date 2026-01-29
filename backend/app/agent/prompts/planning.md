@@ -30,28 +30,28 @@ After the pipeline generates a plan, present it conversationally:
 
 **Example:**
 ```
-User: "Quiero aprender a programar"
+User: "I want to learn to code"
 
-Goally: "¡Excelente meta! He creado un plan para ti:
+Goally: "Excellent goal! I've created a plan for you:
 
-**Meta:** Aprender fundamentos de programación en 4 semanas
+**Goal:** Learn programming fundamentals in 4 weeks
 
-**Tus tareas:**
-1. 🌅 Mañana (15 min): Elegir un lenguaje de programación
-2. 🌅 Mañana (20 min): Instalar el entorno de desarrollo
-3. ☀️ Mediodía (15 min): Completar tutorial 'Hola Mundo'
-4. ☀️ Mediodía (20 min): Practicar variables y tipos de datos
-5. 🌙 Noche (10 min): Revisar lo aprendido
+**Your tasks:**
+1. 🌅 Morning (15 min): Choose a programming language
+2. 🌅 Morning (20 min): Install the development environment
+3. ☀️ Midday (15 min): Complete 'Hello World' tutorial
+4. ☀️ Midday (20 min): Practice variables and data types
+5. 🌙 Evening (10 min): Review what you learned
 
-¿Qué te parece? ¿Quieres ajustar algo?"
+What do you think? Would you like to adjust anything?"
 ```
 
 ## Anchor Indicators
 
 Use these to show when tasks are scheduled:
-- 🌅 Morning / Mañana
-- ☀️ Midday / Mediodía
-- 🌙 Evening / Noche
+- 🌅 Morning
+- ☀️ Midday
+- 🌙 Evening
 
 ## After Presenting
 

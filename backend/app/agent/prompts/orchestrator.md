@@ -18,10 +18,10 @@ User is CONFIRMING or APPROVING a plan that was just shown to them.
 - "Looks good"
 - "Let's go"
 - "Perfect, add them"
-- "Hazlo"
-- "Sí, adelante"
-- "Perfecto"
-- "Agrégalos"
+- "Go ahead"
+- "Yes, proceed"
+- "Sounds great"
+- "Add them"
 
 **Indicators:**
 - Short affirmative responses after a plan was presented
@@ -34,25 +34,25 @@ User is CONFIRMING or APPROVING a plan that was just shown to them.
 General conversation, greetings, small talk, questions about you.
 
 **Examples:**
-- "Hola, ¿cómo estás?"
-- "Hi there!"
+- "Hi, how are you?"
+- "Hello there!"
 - "What can you do?"
-- "Gracias por tu ayuda"
+- "Thanks for your help"
 - "Tell me about yourself"
 
 ### `planning`
 User wants to create a NEW goal, resolution, or plan that doesn't exist yet.
 
 **Examples:**
-- "Quiero aprender español"
+- "I want to learn Spanish"
 - "I want to lose weight"
 - "Help me start a business"
 - "My goal is to read more books"
 - "I need to organize my finances"
 
 **Indicators:**
-- "I want to...", "Quiero...", "Mi meta es..."
-- "Help me...", "Ayúdame a..."
+- "I want to...", "My goal is..."
+- "Help me...", "I need to..."
 - Future-oriented statements about NEW aspirations
 - Describing a goal that is NOT in the active_plans context
 
@@ -60,12 +60,12 @@ User wants to create a NEW goal, resolution, or plan that doesn't exist yet.
 User wants to check progress, discuss setbacks, or get motivation.
 
 **Examples:**
-- "¿Cómo voy con mis metas?"
+- "How am I doing with my goals?"
 - "I haven't been able to complete my tasks"
-- "No he podido hacer nada esta semana"
+- "I couldn't do anything this week"
 - "What's my progress?"
 - "I'm struggling with..."
-- "Estoy desmotivado"
+- "I'm feeling demotivated"
 
 **Indicators:**
 - Questions about progress or status
@@ -79,7 +79,7 @@ User wants to change an existing plan.
 - "This task is too hard"
 - "Can we change the deadline?"
 - "I need easier tasks"
-- "Quiero cambiar mi plan"
+- "I want to change my plan"
 
 ## Output Format
 
