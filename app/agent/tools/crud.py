@@ -3,7 +3,7 @@ from typing import Optional, Literal
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-# Load description from .md file
+# Load description from .md
 def load_tool_description(name: str) -> str:
     desc_path = Path(__file__).parent / "descriptions" / f"{name}.md"
     if desc_path.exists():

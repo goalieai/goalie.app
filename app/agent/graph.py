@@ -11,6 +11,7 @@ from app.agent.nodes import (
     intent_router_node,
     casual_node,
     coaching_node,
+    confirmation_node,
     planning_response_node,
     legacy_coach_node,
 )
@@ -96,6 +97,8 @@ def route_by_intent(state: AgentState) -> str:
     elif intent_type == "modify":
         # For now, route modify to coaching (future: dedicated modify flow)
         return "coaching"
+    elif intent_type == "confirm":
+        return "confirmation"
     else:
         return "casual"
 
@@ -119,6 +122,7 @@ orchestrator_workflow = StateGraph(AgentState)
 orchestrator_workflow.add_node("intent_router", intent_router_node)
 orchestrator_workflow.add_node("casual", casual_node)
 orchestrator_workflow.add_node("coaching", coaching_node)
+orchestrator_workflow.add_node("confirmation", confirmation_node)
 orchestrator_workflow.add_node("planning_pipeline", planning_subgraph)
 orchestrator_workflow.add_node("planning_response", planning_response_node)
 
@@ -132,6 +136,7 @@ orchestrator_workflow.add_conditional_edges(
     {
         "casual": "casual",
         "coaching": "coaching",
+        "confirmation": "confirmation",
         "planning_pipeline": "planning_pipeline",
     },
 )
@@ -139,6 +144,7 @@ orchestrator_workflow.add_conditional_edges(
 # Terminal edges
 orchestrator_workflow.add_edge("casual", END)
 orchestrator_workflow.add_edge("coaching", END)
+orchestrator_workflow.add_edge("confirmation", END)
 orchestrator_workflow.add_edge("planning_pipeline", "planning_response")
 orchestrator_workflow.add_edge("planning_response", END)
 

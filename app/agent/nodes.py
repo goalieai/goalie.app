@@ -362,6 +362,43 @@ async def coaching_node(state: AgentState) -> dict:
     return {"response": extract_text_content(response.content), "actions": actions}
 
 
+async def confirmation_node(state: AgentState) -> dict:
+    """
+    Handle the 'confirm' intent.
+
+    Since plans are saved automatically by the orchestrator in the previous turn,
+    this node simply acknowledges the action and triggers a UI refresh.
+    """
+    print(f"[AGENT] confirmation_node START")
+
+    # Get the most recent plan from the session context
+    active_plans = state.get("active_plans", [])
+    latest_plan = active_plans[-1] if active_plans else None
+
+    if latest_plan:
+        task_count = len(latest_plan.tasks)
+        project_name = latest_plan.project_name
+
+        response = (
+            f"Done! Your **{project_name}** plan is now active. "
+            f"All {task_count} tasks are ready in your task list.\n\n"
+            f"Would you like to start with the first one?"
+        )
+
+        print(f"[AGENT] confirmation_node END | confirmed plan='{project_name}' | tasks={task_count}")
+        return {
+            "response": response,
+            "actions": [{"type": "refresh_ui", "data": {"project_name": project_name}}]
+        }
+    else:
+        # Fallback if no plan exists in session
+        print(f"[AGENT] confirmation_node END | no active plan found")
+        return {
+            "response": "I'm ready to help, but I don't see a pending plan. What goal would you like to work on?",
+            "actions": []
+        }
+
+
 async def planning_response_node(state: AgentState) -> dict:
     """Generate a friendly response presenting the created plan."""
     print(f"[AGENT] planning_response_node START")

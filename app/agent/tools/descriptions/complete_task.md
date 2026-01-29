@@ -8,7 +8,7 @@ Mark a specific task as completed.
 
 ## Examples
 
-User: "I finished studying"
+User: "Ya terminé de estudiar"  
 → complete_task(task_id="study-task-id")
 
 User: "I've completed my workout"  

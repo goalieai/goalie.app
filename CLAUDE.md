@@ -13,40 +13,53 @@ AI agent to help users achieve their New Year's resolutions through micro-task m
 | **Backend**          | FastAPI + LangGraph + Gemini       |
 | **Observability**    | Comet Opik                         |
 | **Frontend Hosting** | Vercel                             |
-| **Backend Hosting**  | Google Cloud Run                   |
+| **Backend Hosting**  | Heroku                             |
 | **CI/CD**            | GitHub Actions                     |
 
 ## Project Structure
 
 ```
 goally/
-├── frontend/           # React 19 SPA
+├── app/                # FastAPI + LangGraph agent (Heroku backend)
+│   ├── api/            # REST endpoints
+│   ├── agent/          # LangGraph workflow
+│   │   ├── graph.py    # Orchestrator + Planning graphs
+│   │   ├── nodes.py    # Node implementations
+│   │   ├── schema.py   # Pydantic models
+│   │   ├── memory.py   # Session management
+│   │   ├── prompts/    # Markdown prompt templates
+│   │   └── tools/      # LangChain tools
+│   └── core/           # Configuration
+├── frontend/           # React 19 SPA (Vercel)
 │   ├── src/
 │   │   ├── pages/      # Route-level components (Index, NotFound)
 │   │   ├── components/ # UI components
-│   │   │   ├── ui/     # Radix-based primitives (43 components)
+│   │   │   ├── ui/     # Radix-based primitives
 │   │   │   ├── AgentChat.tsx
-│   │   │   ├── AgentFeedback.tsx
 │   │   │   ├── TaskCard.tsx
-│   │   │   ├── ProgressSpiral.tsx
 │   │   │   └── ...
-│   │   ├── hooks/      # Custom hooks (useToast, useMobile)
-│   │   ├── lib/        # Utilities (cn helper)
-│   │   └── assets/     # Images
+│   │   ├── hooks/      # Custom hooks
+│   │   ├── lib/        # Utilities
+│   │   └── services/   # API client
 │   └── ...
-├── backend/            # FastAPI + LangGraph agent
-│   └── app/
-│       ├── api/        # REST endpoints
-│       ├── agent/      # LangGraph workflow
-│       └── core/       # Configuration
+├── docs/               # Architecture documentation
+├── Procfile            # Heroku process definition
+├── requirements.txt    # Python dependencies
+├── runtime.txt         # Python version for Heroku
 └── .github/            # CI/CD workflows
 ```
 
 ## Quick Start
 
-### Frontend
+### Backend
 
-### Development
+```bash
+# From project root
+pip install -r requirements.txt
+uvicorn app.main:app --reload  # Runs at http://localhost:8000
+```
+
+### Frontend
 
 ```bash
 cd frontend
@@ -54,20 +67,14 @@ pnpm install    # or npm install
 pnpm dev        # Runs at http://localhost:5173
 ```
 
-### Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload  # Runs at http://localhost:8000
-```
-
 ## Environment Variables
 
-### Backend (`backend/.env`)
+### Backend (`.env` at root)
 
 ```
 GOOGLE_API_KEY=your_gemini_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
 OPIK_API_KEY=your_opik_api_key
 ```
 
@@ -75,6 +82,8 @@ OPIK_API_KEY=your_opik_api_key
 
 ```
 VITE_API_BASE_URL=http://localhost:8000
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 ## Frontend Architecture

@@ -65,7 +65,7 @@ class ProgressResponse(BaseModel):
 class ActionPayload(BaseModel):
     """Payload for an action to be performed by the frontend."""
 
-    type: Literal["create_task", "complete_task", "create_goal", "update_task"]
+    type: Literal["create_task", "complete_task", "create_goal", "update_task", "refresh_ui"]
     data: dict
 
 
@@ -148,11 +148,12 @@ NODE_TO_STEP = {
     "intent_router": ("intent", "Understanding your intent..."),
     "casual": ("response", "Thinking..."),
     "coaching": ("response", "Reviewing your progress..."),
+    "confirmation": ("response", "Confirming your plan..."),
     "planning_response": ("response", "Preparing your plan..."),
     # Planning subgraph nodes
     "smart_refiner": ("smart", "Refining SMART goal..."),
     "task_splitter": ("tasks", "Breaking into micro-tasks..."),
-    "context_matcher": ("schedule", "Assigning to your schedule..."),
+    "context_matcher": ("schedule", "Scheduling your tasks..."),
 }
 
 
@@ -204,7 +205,7 @@ async def chat_stream(request: UnifiedChatRequest):
             }
 
             # Emit initial status
-            yield format_sse("status", "Procesando tu solicitud...")
+            yield format_sse("status", "Processing your request...")
 
             final_result = None
 
@@ -270,7 +271,7 @@ async def chat_stream(request: UnifiedChatRequest):
         except Exception as e:
             print(f"Streaming error: {e}")
             traceback.print_exc()
-            yield format_sse("error", f"Error en el agente: {str(e)}")
+            yield format_sse("error", f"Agent error: {str(e)}")
 
     return StreamingResponse(
         event_generator(),

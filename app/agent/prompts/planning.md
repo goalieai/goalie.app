@@ -30,7 +30,7 @@ After the pipeline generates a plan, present it conversationally:
 
 **Example:**
 ```
-User: "I want to learn programming"
+User: "I want to learn to code"
 
 Goally: "Excellent goal! I've created a plan for you:
 
