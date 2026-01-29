@@ -13,7 +13,7 @@ if settings.opik_api_key:
     except Exception as e:
         print(f"Opik initialization skipped: {e}")
 
-print("STARTING APP - VERSION: CORS_FIX_V4_ROOT_APP")
+print("STARTING APP - VERSION: CORS_FIX_V3_ASGI_PREFLIGHT")
 
 
 class PreflightCORSMiddleware:
@@ -26,6 +26,7 @@ class PreflightCORSMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] == "http" and scope["method"] == "OPTIONS":
+            # Extract origin from headers
             headers = dict(scope.get("headers", []))
             origin = headers.get(b"origin", b"*").decode()
 
@@ -60,17 +61,20 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS allowed origins
+# CORS allowed origins for non-preflight requests
 origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://goalie-app.vercel.app",
+    "https://goalie-app-git-main-goalieais-projects.vercel.app",
+    "https://goalie-iycetyrnb-goalieais-projects.vercel.app",
+    "https://goalie-k7n1wr1mi-goalieais-projects.vercel.app",
 ]
 
-# Regex to match any Vercel deployment
-origin_regex = r"https://.*\.vercel\.app"
+# Regex to match any Vercel preview deployment
+origin_regex = r"https://goalie(-[a-z0-9]+)?(-goalieais-projects)?\.vercel\.app"
 
-# Add CORSMiddleware (handles actual requests)
+# Add CORSMiddleware first (will handle actual CORS headers on real requests)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -80,8 +84,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add preflight handler AFTER CORSMiddleware (so it runs BEFORE)
+# Add our preflight handler AFTER CORSMiddleware (so it runs BEFORE it)
+# This intercepts OPTIONS requests before CORSMiddleware can reject them
 app.add_middleware(PreflightCORSMiddleware)
+
 
 # Include API routes
 app.include_router(router, prefix="/api")
