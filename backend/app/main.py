@@ -54,15 +54,32 @@ async def cors_handler(request: Request, call_next):
     This acts as a failsafe if the main CORSMiddleware rejects the preflight.
     """
     if request.method == "OPTIONS":
+        print(f"DEBUG: Handling OPTIONS request for {request.url} | Origin: {request.headers.get('Origin')}")
         response = Response(status_code=200)
         # Allow all origins for OPTIONS to ensure preflight passes
         # The browser will still enforce security based on the subsequent request's headers
-        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+        req_origin = request.headers.get("Origin", "*")
+        
+        response.headers["Access-Control-Allow-Origin"] = req_origin
         response.headers["Access-Control-Allow-Methods"] = "POST, GET, DELETE, PUT, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        
+        print(f"DEBUG: Returning 200 OK with allowed origin: {req_origin}")
         return response
 
     return await call_next(request)
+
+
+# Explicitly handle OPTIONS for all routes as a fallback
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str, request: Request, response: Response):
+    print(f"DEBUG: Explicit OPTIONS route hit for {full_path}")
+    response.status_code = 200
+    req_origin = request.headers.get("Origin", "*")
+    response.headers["Access-Control-Allow-Origin"] = req_origin
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, DELETE, PUT, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return {"status": "OK"}
 
 
 # Include API routes
