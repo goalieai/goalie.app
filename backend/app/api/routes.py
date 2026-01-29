@@ -13,6 +13,12 @@ from app.api import schemas
 router = APIRouter()
 
 
+@router.get("/")
+async def api_root():
+    """Root API endpoint."""
+    return {"message": "Goally API", "status": "running"}
+
+
 # ============================================================
 # UNIFIED CHAT ENDPOINT (with Orchestrator)
 # ============================================================

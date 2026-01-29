@@ -21,10 +21,11 @@ app = FastAPI(
 # CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
         "http://localhost:5173",
+        "http://localhost:3000",
         "https://goalie-app.vercel.app",
-        "https://goally.vercel.app",
+        "https://goalie-app-git-main-goalieais-projects.vercel.app",
+        "https://goalie-iycetyrnb-goalieais-projects.vercel.app",
     ],
     allow_origin_regex=r"https://goalie-app.*\.vercel\.app|http://localhost:\d+",
     allow_credentials=True,
