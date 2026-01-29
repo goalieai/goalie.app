@@ -20,3 +20,6 @@ pydantic-settings>=2.1.0
 
 # Database
 supabase
+
+# Streaming
+sse-starlette>=1.6.0

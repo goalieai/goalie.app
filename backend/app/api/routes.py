@@ -1,16 +1,29 @@
 from typing import List, Optional, Literal
 from uuid import uuid4
+import json
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import traceback
 from datetime import datetime
+from langchain_core.messages import HumanMessage
 
-from app.agent.graph import run_agent, run_planning_pipeline, run_orchestrator
+from app.agent.graph import run_agent, run_planning_pipeline, run_orchestrator, orchestrator_graph
 from app.agent.schema import UserProfile, MicroTask
+from app.agent.memory import session_store
 from app.core.supabase import supabase
 from app.api import schemas
 
 router = APIRouter()
+
+
+def format_sse(event_type: str, payload) -> str:
+    """Helper to format SSE string."""
+    if isinstance(payload, str):
+        data = {"type": event_type, "message": payload}
+    else:
+        data = {"type": event_type, "data": payload}
+    return f"data: {json.dumps(data)}\n\n"
 
 
 @router.get("/")
@@ -123,6 +136,151 @@ async def chat(request: UnifiedChatRequest):
         print(f"Chat error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# STREAMING CHAT ENDPOINT (SSE)
+# ============================================================
+
+# Map node names to step IDs and user-facing messages
+NODE_TO_STEP = {
+    # Orchestrator nodes
+    "intent_router": ("intent", "Entendiendo tu intención..."),
+    "casual": ("response", "Pensando..."),
+    "coaching": ("response", "Revisando tu progreso..."),
+    "planning_response": ("response", "Preparando tu plan..."),
+    # Planning subgraph nodes
+    "smart_refiner": ("smart", "Refinando objetivo SMART..."),
+    "task_splitter": ("tasks", "Dividiendo en micro-tareas..."),
+    "context_matcher": ("schedule", "Asignando a tu agenda..."),
+}
+
+
+@router.post("/chat/stream")
+async def chat_stream(request: UnifiedChatRequest):
+    """
+    Streaming chat endpoint using Server-Sent Events.
+
+    Emits progress updates as the LangGraph executes each node,
+    keeping the connection alive and providing real-time feedback.
+    This prevents Heroku H12 timeout errors on long-running planning flows.
+    """
+
+    async def event_generator():
+        try:
+            # Generate session ID if not provided
+            session_id = request.session_id or str(uuid4())
+
+            # Parse user profile
+            user_profile = None
+            if request.user_profile:
+                user_profile = UserProfile(
+                    name=request.user_profile.get("name", "User"),
+                    role=request.user_profile.get("role", "Professional"),
+                    anchors=request.user_profile.get(
+                        "anchors", ["Morning Coffee", "After Lunch", "End of Day"]
+                    ),
+                )
+
+            # Get or create session
+            session = session_store.get_or_create(session_id, request.user_id, user_profile)
+            session_store.add_message(session, "user", request.message)
+
+            # Build initial state
+            initial_state = {
+                "messages": [HumanMessage(content=request.message)],
+                "user_input": request.message,
+                "user_profile": session.user_profile,
+                "session_id": session_id,
+                "user_id": request.user_id,
+                "active_plans": session.active_plans,
+                "completed_tasks": session.completed_tasks,
+                "intent": None,
+                "smart_goal": None,
+                "raw_tasks": None,
+                "final_plan": None,
+                "response": None,
+                "actions": [],
+            }
+
+            # Emit initial status
+            yield format_sse("status", "Procesando tu solicitud...")
+
+            final_result = None
+
+            # Stream events from LangGraph
+            async for event in orchestrator_graph.astream_events(initial_state, version="v2"):
+                kind = event["event"]
+                name = event.get("name", "")
+                data = event.get("data", {})
+
+                # --- Node started ---
+                if kind == "on_chain_start" and name in NODE_TO_STEP:
+                    step_id, message = NODE_TO_STEP[name]
+                    yield format_sse("status", message)
+
+                # --- Node completed with intermediate data ---
+                elif kind == "on_chain_end" and name in NODE_TO_STEP:
+                    step_id, _ = NODE_TO_STEP[name]
+                    output = data.get("output", {})
+
+                    # Send progress preview for planning steps
+                    if name == "smart_refiner" and output.get("smart_goal"):
+                        smart_goal = output["smart_goal"]
+                        yield format_sse("progress", {
+                            "step": "smart_goal",
+                            "data": {
+                                "summary": smart_goal.summary if hasattr(smart_goal, 'summary') else str(smart_goal)
+                            }
+                        })
+                    elif name == "task_splitter" and output.get("raw_tasks"):
+                        raw_tasks = output["raw_tasks"]
+                        yield format_sse("progress", {
+                            "step": "raw_tasks",
+                            "data": raw_tasks
+                        })
+
+                # --- Graph completed ---
+                elif kind == "on_chain_end" and name == "LangGraph":
+                    final_result = data.get("output", {})
+
+            # Save to session and emit final response
+            if final_result:
+                if final_result.get("response"):
+                    session_store.add_message(session, "assistant", final_result["response"])
+                if final_result.get("final_plan"):
+                    session.add_plan(final_result["final_plan"])
+                session_store.save(session)
+
+                # Build final response
+                plan_data = None
+                if final_result.get("final_plan"):
+                    plan = final_result["final_plan"]
+                    plan_data = plan.model_dump() if hasattr(plan, 'model_dump') else plan
+
+                yield format_sse("complete", {
+                    "session_id": session_id,
+                    "intent_detected": final_result.get("intent").intent if final_result.get("intent") else "unknown",
+                    "response": final_result.get("response", ""),
+                    "plan": plan_data,
+                    "progress": session.get_progress() if session.active_plans else None,
+                    "actions": final_result.get("actions", [])
+                })
+
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            traceback.print_exc()
+            yield format_sse("error", f"Error en el agente: {str(e)}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Important for Nginx/Heroku
+        }
+    )
 
 
 # ============================================================
