@@ -50,6 +50,8 @@ async def run_planning_pipeline(
     Returns:
         dict with 'final_plan' containing the ProjectPlan
     """
+    print(f"[AGENT] run_planning_pipeline START | goal='{goal[:50]}...' | user_profile={user_profile}")
+
     if user_profile is None:
         user_profile = UserProfile()
 
@@ -68,6 +70,7 @@ async def run_planning_pipeline(
     }
 
     result = await planning_graph.ainvoke(initial_state)
+    print(f"[AGENT] run_planning_pipeline END | final_plan={result.get('final_plan')}")
     return result
 
 
@@ -80,9 +83,12 @@ def route_by_intent(state: AgentState) -> str:
     """Route to the appropriate node based on classified intent."""
     intent = state.get("intent")
     if intent is None:
+        print("[AGENT] route_by_intent | intent=None -> routing to 'casual'")
         return "casual"
 
     intent_type = intent.intent
+    print(f"[AGENT] route_by_intent | intent={intent_type} | confidence={getattr(intent, 'confidence', 'N/A')}")
+
     if intent_type == "planning":
         return "planning_pipeline"
     elif intent_type == "coaching":
@@ -96,7 +102,9 @@ def route_by_intent(state: AgentState) -> str:
 
 async def planning_subgraph(state: AgentState) -> dict:
     """Run the planning pipeline as a subgraph."""
+    print("[AGENT] planning_subgraph START")
     result = await planning_graph.ainvoke(state)
+    print(f"[AGENT] planning_subgraph END | tasks_count={len(result.get('final_plan').tasks) if result.get('final_plan') else 0}")
     return {
         "smart_goal": result.get("smart_goal"),
         "raw_tasks": result.get("raw_tasks"),
@@ -155,8 +163,12 @@ async def run_orchestrator(
     Returns:
         dict with 'response', 'intent_detected', and optionally 'plan'
     """
+    print(f"[AGENT] run_orchestrator START | session_id={session_id} | user_id={user_id}")
+    print(f"[AGENT] run_orchestrator | message='{message[:100]}...' " if len(message) > 100 else f"[AGENT] run_orchestrator | message='{message}'")
+
     # Get or create session
     session = session_store.get_or_create(session_id, user_id, user_profile)
+    print(f"[AGENT] run_orchestrator | session loaded | active_plans={len(session.active_plans)} | history_len={len(session.message_history)}")
 
     # Add user message to history (and persist to Supabase if user_id present)
     session_store.add_message(session, "user", message)
@@ -202,6 +214,7 @@ async def run_orchestrator(
         "actions": result.get("actions", []),
     }
 
+    print(f"[AGENT] run_orchestrator END | intent={response['intent_detected']} | has_plan={response['plan'] is not None} | actions={len(response['actions'])}")
     return response
 
 
@@ -219,6 +232,7 @@ chat_graph = chat_workflow.compile()
 
 async def run_agent(message: str) -> str:
     """Run the chat agent with a user message (legacy endpoint)."""
+    print(f"[AGENT] run_agent (legacy) START | message='{message[:50]}...'")
     initial_state = {
         "messages": [HumanMessage(content=message)],
         "user_input": message,
