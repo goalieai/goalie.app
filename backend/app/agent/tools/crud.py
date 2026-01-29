@@ -28,15 +28,16 @@ def create_task(action: str, time: Optional[str] = None, energy: str = "medium")
 
 class CreateGoalInput(BaseModel):
     """Input schema for create_goal tool."""
-    goal: str = Field(description="Goal description")
+    title: str = Field(description="Goal title/description")
+    description: Optional[str] = Field(default=None, description="Optional detailed description")
     emoji: str = Field(default="🎯", description="Emoji representing the goal")
 
 @tool("create_goal", args_schema=CreateGoalInput)
-def create_goal(goal: str, emoji: str = "🎯") -> dict:
+def create_goal(title: str, description: Optional[str] = None, emoji: str = "🎯") -> dict:
     """Create a new goal or objective for the user."""
     return {
         "type": "create_goal",
-        "data": {"goal": goal, "emoji": emoji}
+        "data": {"title": title, "description": description, "emoji": emoji}
     }
 
 class CompleteTaskInput(BaseModel):

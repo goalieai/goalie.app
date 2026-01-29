@@ -106,8 +106,13 @@ async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_o
     primary = llm_primary.with_structured_output(structured_output) if structured_output else llm_primary
     fallback = llm_fallback.with_structured_output(structured_output) if structured_output else llm_fallback
 
+    output_type = structured_output.__name__ if structured_output else "text"
+    print(f"[AGENT] LLM call START | model={settings.llm_primary_model} | output_type={output_type}")
+
     try:
-        return await primary.ainvoke(messages)
+        result = await primary.ainvoke(messages)
+        print(f"[AGENT] LLM call END | model={settings.llm_primary_model} | success=True")
+        return result
     except Exception as e:
         error_str = str(e).upper()
         error_type = type(e).__name__
@@ -212,6 +217,7 @@ def format_user_context_for_prompt(context: dict) -> str:
 
 async def intent_router_node(state: AgentState) -> dict:
     """Classify user intent to route to the appropriate agent."""
+    print(f"[AGENT] intent_router_node START")
     user_message = state["user_input"]
     user_id = state.get("user_id")
 
@@ -256,11 +262,13 @@ Classify the intent."""
         llm_primary, llm_fallback, messages, structured_output=IntentClassification
     )
 
+    print(f"[AGENT] intent_router_node END | intent={result.intent} | confidence={result.confidence} | reasoning={result.reasoning[:50]}...")
     return {"intent": result}
 
 
 async def casual_node(state: AgentState) -> dict:
     """Handle casual conversation, greetings, and general questions."""
+    print(f"[AGENT] casual_node START")
     user_message = state["user_input"]
     user_name = state["user_profile"].name
     user_id = state.get("user_id")
@@ -292,11 +300,13 @@ async def casual_node(state: AgentState) -> dict:
             for call in response.tool_calls
         ]
 
+    print(f"[AGENT] casual_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
     return {"response": extract_text_content(response.content), "actions": actions}
 
 
 async def coaching_node(state: AgentState) -> dict:
     """Handle progress reviews, motivation, and setback discussions."""
+    print(f"[AGENT] coaching_node START")
     user_message = state["user_input"]
     user_name = state["user_profile"].name
     user_id = state.get("user_id")
@@ -348,11 +358,13 @@ async def coaching_node(state: AgentState) -> dict:
             for call in response.tool_calls
         ]
 
+    print(f"[AGENT] coaching_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
     return {"response": extract_text_content(response.content), "actions": actions}
 
 
 async def planning_response_node(state: AgentState) -> dict:
     """Generate a friendly response presenting the created plan."""
+    print(f"[AGENT] planning_response_node START")
     final_plan = state["final_plan"]
     user_name = state["user_profile"].name
 
@@ -407,7 +419,22 @@ Present this plan to the user in a friendly, encouraging way. Use their language
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
-    return {"response": extract_text_content(response.content)}
+    # Convert plan tasks into create_task actions for the frontend
+    actions = []
+    for task in final_plan.tasks:
+        actions.append({
+            "type": "create_task",
+            "data": {
+                "task_name": task.task_name,
+                "estimated_minutes": task.estimated_minutes,
+                "energy_required": task.energy_required,
+                "assigned_anchor": task.assigned_anchor,
+                "rationale": task.rationale,
+            }
+        })
+
+    print(f"[AGENT] planning_response_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
+    return {"response": extract_text_content(response.content), "actions": actions}
 
 
 # ============================================================
@@ -418,6 +445,7 @@ Present this plan to the user in a friendly, encouraging way. Use their language
 # --- Node 1: The Project Manager ---
 async def smart_refiner_node(state: AgentState) -> dict:
     """Refines vague input into a strict SMART goal."""
+    print(f"[AGENT] smart_refiner_node START")
     goal_text = state["user_input"]
 
     system_prompt = """You are a pragmatic Project Manager.
@@ -431,12 +459,14 @@ async def smart_refiner_node(state: AgentState) -> dict:
         llm_primary, llm_fallback, messages, structured_output=SmartGoalSchema
     )
 
+    print(f"[AGENT] smart_refiner_node END | summary={result.summary[:50]}... | deadline={result.deadline}")
     return {"smart_goal": result}
 
 
 # --- Node 2: The Architect ---
 async def task_splitter_node(state: AgentState) -> dict:
     """Breaks the SMART goal into atomic micro-tasks."""
+    print(f"[AGENT] task_splitter_node START")
     smart_goal = state["smart_goal"]
 
     system_prompt = """You are a Task Architect. Break projects into atomic, actionable steps.
@@ -462,12 +492,14 @@ async def task_splitter_node(state: AgentState) -> dict:
         llm_primary, llm_fallback, messages, structured_output=TaskList
     )
 
+    print(f"[AGENT] task_splitter_node END | tasks_count={len(result.tasks)} | tasks={result.tasks}")
     return {"raw_tasks": result.tasks}
 
 
 # --- Node 3: The Tiny Habits Coach ---
 async def context_matcher_node(state: AgentState) -> dict:
     """Matches tasks to user anchors based on energy levels."""
+    print(f"[AGENT] context_matcher_node START")
     tasks = state["raw_tasks"]
     smart_goal = state["smart_goal"]
     user = state["user_profile"]
@@ -509,6 +541,7 @@ async def context_matcher_node(state: AgentState) -> dict:
         llm_primary, llm_fallback, messages, structured_output=ProjectPlan
     )
 
+    print(f"[AGENT] context_matcher_node END | project={result.project_name} | tasks_count={len(result.tasks)}")
     return {"final_plan": result}
 
 
@@ -519,6 +552,7 @@ async def context_matcher_node(state: AgentState) -> dict:
 
 async def legacy_coach_node(state: AgentState) -> dict:
     """Main coaching node that responds to user messages (legacy)."""
+    print(f"[AGENT] legacy_coach_node START")
     system_prompt = build_system_prompt("system_base")
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
 
@@ -526,4 +560,5 @@ async def legacy_coach_node(state: AgentState) -> dict:
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
+    print(f"[AGENT] legacy_coach_node END")
     return {"messages": [response]}

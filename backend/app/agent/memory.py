@@ -107,6 +107,29 @@ class MemorySessionStore(SessionStore):
 class SupabaseSessionStore(SessionStore):
     """Persistent storage using Supabase."""
 
+    def _load_user_profile(self, user_id: str) -> UserProfile:
+        """Load user profile from profiles table (source of truth for preferences)."""
+        if not supabase or not user_id:
+            return UserProfile()
+
+        try:
+            res = supabase.table("profiles").select("first_name, preferences").eq("id", user_id).execute()
+            if res.data:
+                data = res.data[0]
+                prefs = data.get("preferences") or {}
+                profile = UserProfile(
+                    name=data.get("first_name") or "User",
+                    role=prefs.get("role", "Professional"),
+                    anchors=prefs.get("anchors", ["Morning Coffee", "After Lunch", "End of Day"]),
+                )
+                print(f"[MEMORY] Loaded profile for user {user_id[:8]}... | name={profile.name} | anchors={profile.anchors}")
+                return profile
+        except Exception as e:
+            print(f"[MEMORY] Error loading user profile: {e}")
+
+        print(f"[MEMORY] No profile found for user {user_id[:8]}..., using defaults")
+        return UserProfile()
+
     def get_or_create(
         self,
         session_id: str,
@@ -123,10 +146,15 @@ class SupabaseSessionStore(SessionStore):
         if res.data:
             # Load existing session
             data = res.data[0]
+            # Fetch user profile from profiles table (source of truth)
+            loaded_profile = self._load_user_profile(user_id) if user_id else UserProfile()
+            # Merge with provided profile (frontend may send updated name)
+            if user_profile:
+                loaded_profile.name = user_profile.name or loaded_profile.name
             session = SessionState(
                 session_id=data["id"],
                 user_id=data["user_id"],
-                user_profile=UserProfile(**data["user_profile"]),
+                user_profile=loaded_profile,
             )
             
             # Load messages
@@ -146,14 +174,24 @@ class SupabaseSessionStore(SessionStore):
                     timestamp=datetime.fromisoformat(m["created_at"])
                 ))
             
-            # Load plans and tasks
-            plan_res = supabase.table("plans").select("*, tasks(*)").eq("session_id", session_id).execute()
-            for p in plan_res.data:
-                tasks = [MicroTask(**t) for t in p["tasks"]]
+            # Load goals and their associated tasks
+            goals_res = supabase.table("goals").select("*").eq("user_id", user_id).eq("status", "active").execute()
+            for g in goals_res.data:
+                # Fetch tasks linked to this goal
+                tasks_res = supabase.table("tasks").select("*").eq("goal_id", g["id"]).execute()
+                tasks = []
+                for t in tasks_res.data:
+                    tasks.append(MicroTask(
+                        task_name=t["task_name"],
+                        estimated_minutes=t.get("estimated_minutes", 15),
+                        energy_required=t.get("energy_required", "medium"),
+                        assigned_anchor=t.get("assigned_anchor", ""),
+                        rationale=t.get("rationale", "")
+                    ))
                 plan = ProjectPlan(
-                    project_name=p["project_name"],
-                    smart_goal_summary=p["smart_goal_summary"],
-                    deadline=p["deadline"],
+                    project_name=g["title"],
+                    smart_goal_summary=g.get("description") or g["title"],
+                    deadline=str(g.get("target_date") or ""),
                     tasks=tasks
                 )
                 session.active_plans.append(plan)
@@ -161,16 +199,20 @@ class SupabaseSessionStore(SessionStore):
             return session
         
         # 2. Create new session if not found
+        # Load profile from profiles table (source of truth)
+        loaded_profile = self._load_user_profile(user_id) if user_id else UserProfile()
+        # Merge with provided profile (frontend may send updated name)
+        if user_profile:
+            loaded_profile.name = user_profile.name or loaded_profile.name
         session = SessionState(
             session_id=session_id,
             user_id=user_id,
-            user_profile=user_profile or UserProfile(),
+            user_profile=loaded_profile,
         )
         
         supabase.table("sessions").upsert({
             "id": session_id,
             "user_id": user_id,
-            "user_profile": session.user_profile.model_dump(),
             "last_active": datetime.now().isoformat()
         }).execute()
         
@@ -180,39 +222,54 @@ class SupabaseSessionStore(SessionStore):
         """Save session state to Supabase."""
         if not supabase or not session.user_id: return
 
-        # Update session metadata
+        # Update session metadata (user_profile stored in profiles table, not here)
         supabase.table("sessions").update({
-            "user_profile": session.user_profile.model_dump(),
             "last_active": datetime.now().isoformat()
         }).eq("id", session.session_id).execute()
 
-        # Update plans (simplified: just save the active plans)
+        # Save new goals from active plans (skip if already persisted)
         for plan in session.active_plans:
-            plan_data = {
+            # Check if goal already exists for this user with same title
+            existing = supabase.table("goals").select("id").eq("user_id", session.user_id).eq("title", plan.project_name).execute()
+
+            if existing.data:
+                # Goal already exists, skip
+                continue
+
+            # Try to parse deadline as datetime, otherwise store as None
+            # (deadline is often human-readable like "End of this week")
+            target_date = None
+            if plan.deadline:
+                try:
+                    # Try ISO format parsing
+                    target_date = datetime.fromisoformat(plan.deadline.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    # Not a valid datetime, store description in the description field instead
+                    pass
+
+            goal_data = {
                 "session_id": session.session_id,
-                "user_id": session.user_id, # Added for optimized schema
-                "project_name": plan.project_name,
-                "smart_goal_summary": plan.smart_goal_summary,
-                "deadline": plan.deadline
+                "user_id": session.user_id,
+                "title": plan.project_name,
+                "description": f"{plan.smart_goal_summary} (Deadline: {plan.deadline})" if plan.deadline and not target_date else plan.smart_goal_summary,
+                "target_date": target_date.isoformat() if target_date else None,
+                "status": "active"
             }
-            # Upsert plan based on project_name + session_id or similar?
-            # For hackathon simplicity, let's just insert/update if we had IDs
-            # but we'll stick to basic sync for now.
-            res = supabase.table("plans").upsert(plan_data, on_conflict="session_id,project_name").execute()
-            
+            res = supabase.table("goals").insert(goal_data).execute()
+
             if res.data:
-                plan_id = res.data[0]["id"]
+                goal_id = res.data[0]["id"]
                 for task in plan.tasks:
                     task_data = {
-                        "plan_id": plan_id,
-                        "user_id": session.user_id, # Added for optimized schema
+                        "goal_id": goal_id,
+                        "user_id": session.user_id,
                         "task_name": task.task_name,
                         "estimated_minutes": task.estimated_minutes,
                         "energy_required": task.energy_required,
                         "assigned_anchor": task.assigned_anchor,
                         "rationale": task.rationale
                     }
-                    supabase.table("tasks").upsert(task_data, on_conflict="plan_id,task_name").execute()
+                    supabase.table("tasks").insert(task_data).execute()
 
     def add_message(self, session_id: str, user_id: str, role: str, content: str | List):
         """Helper to save message directly."""

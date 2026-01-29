@@ -1,8 +1,9 @@
-from typing import List, Optional, Literal, Dict, Any
+from typing import Optional, Literal, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # --- TASKS ---
+
 
 class TaskCreate(BaseModel):
     task_name: str
@@ -14,6 +15,7 @@ class TaskCreate(BaseModel):
     rationale: Optional[str] = None
     assigned_anchor: Optional[str] = None
 
+
 class TaskUpdate(BaseModel):
     task_name: Optional[str] = None
     scheduled_text: Optional[str] = None
@@ -22,6 +24,7 @@ class TaskUpdate(BaseModel):
     energy_required: Optional[Literal["high", "medium", "low"]] = None
     estimated_minutes: Optional[int] = None
     assigned_anchor: Optional[str] = None
+
 
 class TaskResponse(BaseModel):
     id: str
@@ -40,7 +43,9 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 # --- GOALS ---
+
 
 class GoalCreate(BaseModel):
     title: str
@@ -48,12 +53,14 @@ class GoalCreate(BaseModel):
     emoji: str = "🎯"
     target_date: Optional[datetime] = None
 
+
 class GoalUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     emoji: Optional[str] = None
     status: Optional[Literal["active", "achieved", "archived"]] = None
     target_date: Optional[datetime] = None
+
 
 class GoalResponse(BaseModel):
     id: str
@@ -67,11 +74,14 @@ class GoalResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 # --- PROFILES ---
+
 
 class ProfileUpdate(BaseModel):
     first_name: Optional[str] = None
     preferences: Optional[Dict[str, Any]] = None  # timezone, anchors, etc.
+
 
 class ProfileResponse(BaseModel):
     id: str

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from "react";
 import { Clock, MessageCircle, X, Medal } from "lucide-react";
-import { agentApi, Action } from "@/services/api";
+import { agentApi, taskApi, goalApi, Action } from "@/services/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks, useCompleteTask } from "@/hooks/useTasks";
@@ -129,23 +129,62 @@ const Index = () => {
   }, []);
 
   // Process actions returned by the AI agent
-  const processAction = useCallback((action: Action) => {
-    const { type } = action;
+  const processAction = useCallback(async (action: Action) => {
+    const { type, data } = action;
+    const userId = user?.id;
 
-    switch (type) {
-      case "create_task":
-      case "complete_task":
-      case "update_task": {
-        queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        break;
-      }
-
-      case "create_goal": {
-        queryClient.invalidateQueries({ queryKey: ["goals"] });
-        break;
-      }
+    // Guest users can't persist to database
+    if (!userId) {
+      console.log("[Action] Skipping action for guest user:", type);
+      return;
     }
-  }, [queryClient]);
+
+    try {
+      switch (type) {
+        case "create_task": {
+          console.log("[Action] Creating task:", data);
+          await taskApi.create({
+            user_id: userId,
+            task_name: (data.task_name || data.action) as string,
+            estimated_minutes: (data.estimated_minutes as number) || 15,
+            energy_required: (data.energy_required as "high" | "medium" | "low") || "medium",
+            scheduled_text: data.assigned_anchor as string,
+            assigned_anchor: data.assigned_anchor as string,
+            rationale: data.rationale as string,
+          });
+          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          break;
+        }
+
+        case "complete_task": {
+          const taskId = data.task_id as string;
+          if (taskId) {
+            await taskApi.complete(taskId, userId);
+            queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          }
+          break;
+        }
+
+        case "create_goal": {
+          console.log("[Action] Creating goal:", data);
+          await goalApi.create({
+            user_id: userId,
+            title: data.goal as string,
+            emoji: (data.emoji as string) || "🎯",
+          });
+          queryClient.invalidateQueries({ queryKey: ["goals"] });
+          break;
+        }
+
+        case "update_task": {
+          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          break;
+        }
+      }
+    } catch (error) {
+      console.error("[Action] Failed to process action:", type, error);
+    }
+  }, [queryClient, user?.id]);
 
   const handleSendMessage = useCallback(async (content: string) => {
     setMessages((prev) => [
@@ -164,6 +203,7 @@ const Index = () => {
       const response = await agentApi.sendMessage({
         message: content,
         session_id: sessionIdRef.current || undefined,
+        user_id: user?.id,
         user_profile: {
           name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
         },
@@ -185,7 +225,8 @@ const Index = () => {
 
       // Process any actions from the agent
       if (response.actions && response.actions.length > 0) {
-        response.actions.forEach(processAction);
+        console.log("[Agent] Processing actions:", response.actions.length);
+        await Promise.all(response.actions.map(processAction));
       }
 
     } catch (error) {
