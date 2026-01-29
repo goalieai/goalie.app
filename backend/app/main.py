@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.routes import router
 from app.core.config import settings
@@ -12,7 +13,47 @@ if settings.opik_api_key:
     except Exception as e:
         print(f"Opik initialization skipped: {e}")
 
-print("STARTING APP - VERSION: CORS_FIX_V2_NO_REGEX")
+print("STARTING APP - VERSION: CORS_FIX_V3_ASGI_PREFLIGHT")
+
+
+class PreflightCORSMiddleware:
+    """
+    Raw ASGI middleware that handles OPTIONS preflight requests BEFORE CORSMiddleware.
+    This ensures preflight always succeeds regardless of origin.
+    """
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http" and scope["method"] == "OPTIONS":
+            # Extract origin from headers
+            headers = dict(scope.get("headers", []))
+            origin = headers.get(b"origin", b"*").decode()
+
+            print(f"PREFLIGHT: OPTIONS {scope['path']} | Origin: {origin}")
+
+            response_headers = [
+                (b"access-control-allow-origin", origin.encode()),
+                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS, PATCH"),
+                (b"access-control-allow-headers", b"Authorization, Content-Type, X-Requested-With"),
+                (b"access-control-allow-credentials", b"true"),
+                (b"access-control-max-age", b"600"),
+                (b"content-length", b"0"),
+            ]
+
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": response_headers,
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b"",
+            })
+            return
+
+        await self.app(scope, receive, send)
+
 
 app = FastAPI(
     title="Goally API",
@@ -20,23 +61,20 @@ app = FastAPI(
     version="0.1.0"
 )
 
-from fastapi import Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-
-# CORS middleware for frontend
+# CORS allowed origins for non-preflight requests
 origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://goalie-app.vercel.app",
     "https://goalie-app-git-main-goalieais-projects.vercel.app",
     "https://goalie-iycetyrnb-goalieais-projects.vercel.app",
-    "https://goalie-k7n1wr1mi-goalieais-projects.vercel.app",  # Specific user request
+    "https://goalie-k7n1wr1mi-goalieais-projects.vercel.app",
 ]
 
-# Regex to match any Vercel preview deployment from this project
-# Matches https://goalie-*-goalieais-projects.vercel.app
-origin_regex = r"https://goalie-.*-goalieais-projects\.vercel\.app"
+# Regex to match any Vercel preview deployment
+origin_regex = r"https://goalie(-[a-z0-9]+)?(-goalieais-projects)?\.vercel\.app"
 
+# Add CORSMiddleware first (will handle actual CORS headers on real requests)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -46,40 +84,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.middleware("http")
-async def cors_handler(request: Request, call_next):
-    """
-    Manual CORS handler to ensure OPTIONS requests always return 200 OK.
-    This acts as a failsafe if the main CORSMiddleware rejects the preflight.
-    """
-    if request.method == "OPTIONS":
-        print(f"DEBUG: Handling OPTIONS request for {request.url} | Origin: {request.headers.get('Origin')}")
-        response = Response(status_code=200)
-        # Allow all origins for OPTIONS to ensure preflight passes
-        # The browser will still enforce security based on the subsequent request's headers
-        req_origin = request.headers.get("Origin", "*")
-        
-        response.headers["Access-Control-Allow-Origin"] = req_origin
-        response.headers["Access-Control-Allow-Methods"] = "POST, GET, DELETE, PUT, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-        
-        print(f"DEBUG: Returning 200 OK with allowed origin: {req_origin}")
-        return response
-
-    return await call_next(request)
-
-
-# Explicitly handle OPTIONS for all routes as a fallback
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str, request: Request, response: Response):
-    print(f"DEBUG: Explicit OPTIONS route hit for {full_path}")
-    response.status_code = 200
-    req_origin = request.headers.get("Origin", "*")
-    response.headers["Access-Control-Allow-Origin"] = req_origin
-    response.headers["Access-Control-Allow-Methods"] = "POST, GET, DELETE, PUT, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    return {"status": "OK"}
+# Add our preflight handler AFTER CORSMiddleware (so it runs BEFORE it)
+# This intercepts OPTIONS requests before CORSMiddleware can reject them
+app.add_middleware(PreflightCORSMiddleware)
 
 
 # Include API routes
