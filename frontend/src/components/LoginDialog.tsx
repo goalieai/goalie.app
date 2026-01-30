@@ -56,12 +56,12 @@ export default function LoginDialog({ trigger }: LoginDialogProps) {
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
-                {trigger || (
+                {/* {trigger || (
                     <Button variant="outline" size="sm" className="gap-2">
                         <LogIn className="w-4 h-4" />
                         Sign In
                     </Button>
-                )}
+                )} */}
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
