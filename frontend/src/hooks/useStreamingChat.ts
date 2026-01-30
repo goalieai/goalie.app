@@ -75,6 +75,8 @@ export interface UseStreamingChatReturn {
   stagingPlan: Plan | null;
   /** Whether we're waiting for user to confirm a plan */
   awaitingConfirmation: boolean;
+  /** Clear staging plan without full reset (for direct save) */
+  clearStagingPlan: () => void;
   // Socratic Gatekeeper: Clarification state
   /** Clarification data when agent needs more info */
   clarification: ClarificationState | null;
@@ -194,6 +196,12 @@ export function useStreamingChat(): UseStreamingChatReturn {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+  }, []);
+
+  // Clear staging plan without full reset (for direct confirmation flow)
+  const clearStagingPlan = useCallback(() => {
+    setStagingPlan(null);
+    setAwaitingConfirmation(false);
   }, []);
 
   const processEvent = useCallback((event: StreamEvent) => {
@@ -397,6 +405,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
     // HITL state
     stagingPlan,
     awaitingConfirmation,
+    clearStagingPlan,
     // Socratic Gatekeeper state
     clarification,
     awaitingClarification,

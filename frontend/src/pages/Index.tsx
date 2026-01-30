@@ -53,6 +53,14 @@ const Index = () => {
   // Session management for conversation continuity
   const sessionIdRef = useRef<string | null>(null);
 
+  // Track if we've shown the modify prompt for the current plan (prevents duplicates)
+  const modifyPromptShownRef = useRef(false);
+
+  // Reset modify prompt flag when staging plan changes (new plan or cleared)
+  useEffect(() => {
+    modifyPromptShownRef.current = false;
+  }, [streaming.stagingPlan]);
+
   // Derived state for Tasks
   const tasks = useMemo(() => {
     if (!tasksData) return emptyTasks;
@@ -133,39 +141,80 @@ const Index = () => {
     setIsChatOpen(true);
   }, []);
 
-  // HITL: Handle plan confirmation
+  // HITL: Handle plan confirmation - saves directly to storage without agent round-trip
   const handleConfirmPlan = useCallback(async () => {
     if (!streaming.stagingPlan) return;
 
     setIsConfirmingPlan(true);
+    const store = getStore(user?.id ?? null);
+
     try {
-      // Send "yes" to confirm the staged plan
-      await streaming.sendMessage({
-        message: "Yes, save this plan",
-        session_id: sessionIdRef.current || undefined,
-        user_id: user?.id,
-        user_profile: {
-          name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
+      // Save all tasks directly to storage
+      for (const task of streaming.stagingPlan.tasks) {
+        await store.tasks.create({
+          task_name: task.task_name,
+          estimated_minutes: task.estimated_minutes,
+          energy_required: task.energy_required,
+          scheduled_text: task.assigned_anchor,
+          assigned_anchor: task.assigned_anchor,
+          rationale: task.rationale,
+        });
+      }
+
+      // Clear the staging plan from streaming state
+      streaming.clearStagingPlan();
+
+      // Invalidate queries to refresh UI
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+
+      // Add confirmation message to chat (just for history, no agent call)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          content: "Save this plan",
+          sender: "user" as const,
+          timestamp: new Date(),
         },
-      });
+        {
+          id: `agent-${Date.now() + 1}`,
+          content: "Done! I've saved your plan. Your tasks are ready to go! 🎯",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (error) {
+      console.error("[Confirm] Failed to save plan:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agent-${Date.now()}`,
+          content: "Sorry, I couldn't save the plan. Please try again.",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
     } finally {
       setIsConfirmingPlan(false);
     }
-  }, [streaming, user?.id, user?.email, isGuest]);
+  }, [streaming, user?.id, queryClient]);
 
   // HITL: Handle plan modification request
   // Opens chat with a helpful prompt - user types their changes naturally
   const handleModifyPlan = useCallback(() => {
-    // Add agent message prompting for what to change
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `agent-${Date.now()}`,
-        content: "What would you like to change? (e.g., 'Make it easier', 'Less tasks', 'No morning tasks')",
-        sender: "agent" as const,
-        timestamp: new Date(),
-      },
-    ]);
+    // Only add the prompt message once per plan
+    if (!modifyPromptShownRef.current) {
+      modifyPromptShownRef.current = true;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agent-${Date.now()}`,
+          content: "What would you like to change? (e.g., 'Make it easier', 'Less tasks', 'No morning tasks')",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+    }
     // Open chat so user can type their modification request
     setIsChatOpen(true);
   }, []);
