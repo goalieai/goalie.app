@@ -13,6 +13,7 @@ from app.agent.nodes import (
     coaching_node,
     confirmation_node,
     planning_response_node,
+    modify_node,
     legacy_coach_node,
 )
 from app.agent.memory import session_store
@@ -122,8 +123,8 @@ def route_by_intent(state: AgentState) -> str:
     elif intent_type == "coaching":
         return "coaching"
     elif intent_type == "modify":
-        # For now, route modify to coaching (future: dedicated modify flow)
-        return "coaching"
+        # EDIT LOOP: Route to modify_node for plan modifications
+        return "modify"
     elif intent_type == "confirm":
         return "confirmation"
     else:
@@ -170,6 +171,7 @@ orchestrator_workflow.add_node("intent_router", intent_router_node)
 orchestrator_workflow.add_node("casual", casual_node)
 orchestrator_workflow.add_node("coaching", coaching_node)
 orchestrator_workflow.add_node("confirmation", confirmation_node)
+orchestrator_workflow.add_node("modify", modify_node)
 orchestrator_workflow.add_node("planning_pipeline", planning_subgraph)
 orchestrator_workflow.add_node("planning_response", planning_response_node)
 
@@ -184,6 +186,7 @@ orchestrator_workflow.add_conditional_edges(
         "casual": "casual",
         "coaching": "coaching",
         "confirmation": "confirmation",
+        "modify": "modify",
         "planning_pipeline": "planning_pipeline",
     },
 )
@@ -205,6 +208,7 @@ def route_after_planning_pipeline(state: AgentState) -> str:
 orchestrator_workflow.add_edge("casual", END)
 orchestrator_workflow.add_edge("coaching", END)
 orchestrator_workflow.add_edge("confirmation", END)
+orchestrator_workflow.add_edge("modify", END)
 
 # SOCRATIC GATEKEEPER: Conditional edge after planning_pipeline
 orchestrator_workflow.add_conditional_edges(

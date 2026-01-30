@@ -265,6 +265,14 @@ async def intent_router_node(state: AgentState) -> dict:
             f"User has {len(state['active_plans'])} active session plan(s)."
         )
 
+    # HITL: Include staging_plan context to help detect modify intent
+    staging_plan = state.get("staging_plan")
+    if staging_plan:
+        context_parts.append(
+            f"User has a DRAFT PLAN awaiting confirmation: '{staging_plan.project_name}' with {len(staging_plan.tasks)} tasks. "
+            f"If user wants to change this plan, classify as 'modify'."
+        )
+
     context = "\n".join(context_parts) if context_parts else "No existing tasks or plans."
 
     system_prompt = load_prompt("orchestrator")
@@ -331,8 +339,8 @@ async def coaching_node(state: AgentState) -> dict:
     user_message = state["user_input"]
     user_name = state["user_profile"].name
     user_id = state.get("user_id")
-    active_plans = state.get("active_plans", [])
-    session_completed = state.get("completed_tasks", [])
+    active_plans = state.get("active_plans") or []
+    session_completed = state.get("completed_tasks") or []
 
     system_prompt = build_system_prompt("system_base", "coaching")
 
@@ -430,7 +438,7 @@ async def confirmation_node(state: AgentState) -> dict:
         }
 
     # Legacy flow: Check for active plans (backwards compatibility)
-    active_plans = state.get("active_plans", [])
+    active_plans = state.get("active_plans") or []
     latest_plan = active_plans[-1] if active_plans else None
 
     if latest_plan:
@@ -469,7 +477,7 @@ async def planning_response_node(state: AgentState) -> dict:
     user_name = state["user_profile"].name
 
     # Get context tags to inform presentation style
-    context_tags = state.get("goal_context_tags", [])
+    context_tags = state.get("goal_context_tags") or []
     is_beginner = "beginner" in context_tags or "sedentary" in context_tags
 
     system_prompt = build_system_prompt("system_base", "planning")
@@ -628,7 +636,7 @@ async def task_splitter_node(state: AgentState) -> dict:
     user = state["user_profile"]
 
     # Get context tags from the Refiner (determines Coach vs Secretary mode)
-    context_tags = state.get("goal_context_tags", [])
+    context_tags = state.get("goal_context_tags") or []
     context_tags_str = ", ".join(context_tags) if context_tags else "none specified"
 
     # Get user anchors for task scheduling context
@@ -714,6 +722,78 @@ async def context_matcher_node(state: AgentState) -> dict:
 
     print(f"[AGENT] context_matcher_node END | project={result.project_name} | tasks_count={len(result.tasks)}")
     return {"final_plan": result}
+
+
+# ============================================================
+# MODIFY NODE - Edit Loop for Plan Modifications
+# ============================================================
+
+
+async def modify_node(state: AgentState) -> dict:
+    """Modifies an existing plan based on user feedback.
+
+    EDIT LOOP PATTERN: Takes the current staging_plan (or active_plans[0]),
+    applies user-requested changes, and returns a NEW staging_plan.
+    This keeps the HITL flow intact - user must still confirm after modifications.
+    """
+    print(f"[AGENT] modify_node START")
+
+    # 1. Get the target plan (prefer staging, fallback to active)
+    active_plans = state.get("active_plans") or []
+    current_plan = state.get("staging_plan") or (active_plans[0] if active_plans else None)
+
+    if not current_plan:
+        print(f"[AGENT] modify_node END | no plan to modify")
+        return {
+            "response": "I don't see a plan to modify. Would you like to create one? Just tell me your goal!",
+            "actions": [],
+        }
+
+    # 2. Get user feedback from the last message
+    user_feedback = state["user_input"]
+    user = state["user_profile"]
+    user_anchors = ", ".join(user.anchors)
+
+    # 3. Serialize current plan to JSON for the LLM
+    current_plan_json = current_plan.model_dump_json(indent=2)
+
+    print(f"[AGENT] modify_node | plan={current_plan.project_name} | feedback={user_feedback[:50]}...")
+
+    # 4. Load and format the modifier prompt
+    system_prompt = load_prompt("modifier")
+    system_prompt = system_prompt.replace("{current_plan_json}", current_plan_json)
+    system_prompt = system_prompt.replace("{user_feedback}", user_feedback)
+    system_prompt = system_prompt.replace("{user_anchors}", user_anchors)
+
+    user_prompt = f"""Please modify this plan based on my feedback:
+
+CURRENT PLAN:
+{current_plan_json}
+
+MY FEEDBACK: {user_feedback}
+
+USER ANCHORS: {user_anchors}
+
+Return the complete updated plan with my requested changes applied."""
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+
+    # 5. Run the modifier LLM
+    result = await invoke_with_fallback(
+        llm_primary, llm_fallback, messages, structured_output=ProjectPlan
+    )
+
+    print(f"[AGENT] modify_node END | updated_plan={result.project_name} | tasks_count={len(result.tasks)}")
+
+    # 6. Return the NEW staging plan (triggers UI preview update)
+    return {
+        "staging_plan": result,
+        "response": "I've updated the plan based on your feedback. How does this look?",
+        "actions": [],
+    }
 
 
 # ============================================================

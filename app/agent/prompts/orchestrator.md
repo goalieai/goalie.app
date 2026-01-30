@@ -80,6 +80,12 @@ User wants to change an existing plan.
 - "Can we change the deadline?"
 - "I need easier tasks"
 - "I want to change my plan"
+- "Make it easier"
+- "Make it harder"
+- "Less tasks"
+- "No morning tasks"
+- "I can't do running"
+- "Remove the first task"
 
 ### `planning_continuation`
 **System Internal Use Only.**

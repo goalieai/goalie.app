@@ -154,27 +154,19 @@ const Index = () => {
   }, [streaming, user?.id, user?.email, isGuest]);
 
   // HITL: Handle plan modification request
+  // Opens chat with a helpful prompt - user types their changes naturally
   const handleModifyPlan = useCallback(() => {
-    // Add a message to explain user wants to modify
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `m${Date.now()}`,
-        content: "I'd like to modify this plan...",
-        sender: "user" as const,
-        timestamp: new Date(),
-      },
-    ]);
-    // Open chat and prompt for changes
+    // Add agent message prompting for what to change
     setMessages((prev) => [
       ...prev,
       {
         id: `agent-${Date.now()}`,
-        content: "Sure! What would you like to change about this plan? You can ask me to add more tasks, adjust the schedule, or change specific tasks.",
+        content: "What would you like to change? (e.g., 'Make it easier', 'Less tasks', 'No morning tasks')",
         sender: "agent" as const,
         timestamp: new Date(),
       },
     ]);
+    // Open chat so user can type their modification request
     setIsChatOpen(true);
   }, []);
 
