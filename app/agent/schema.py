@@ -16,13 +16,44 @@ class UserProfile(BaseModel):
 class IntentClassification(BaseModel):
     """Output of the Intent Router node."""
 
-    intent: Literal["casual", "planning", "coaching", "modify", "confirm"] = Field(
+    intent: Literal["casual", "planning", "coaching", "modify", "confirm", "planning_continuation"] = Field(
         description="The classified user intent"
     )
     confidence: float = Field(
         description="Confidence score from 0.0 to 1.0", ge=0.0, le=1.0
     )
     reasoning: str = Field(description="Brief explanation of why this intent was chosen")
+
+
+# --- Socratic Gatekeeper: Dual-Path Refiner Output ---
+class RefinerOutput(BaseModel):
+    """Output of the Smart Refiner node with Socratic Gatekeeper logic."""
+
+    status: Literal["needs_clarification", "ready"] = Field(
+        description="Whether the goal needs more context or is ready to plan"
+    )
+    # Path A: Clarification needed
+    clarifying_question: Optional[str] = Field(
+        default=None,
+        description="Question to ask user if status is needs_clarification"
+    )
+    saved_context: Optional[dict] = Field(
+        default=None,
+        description="Context to save if status is needs_clarification (draft_goal, missing_info)"
+    )
+    # Path B: Ready to plan
+    smart_goal: Optional[str] = Field(
+        default=None,
+        description="Final SMART goal summary if status is ready"
+    )
+    context_tags: Optional[List[str]] = Field(
+        default=None,
+        description="Tags describing user context: ['beginner', 'expert', 'sedentary', 'has_equipment', etc]"
+    )
+    response_text: Optional[str] = Field(
+        default=None,
+        description="Confirmation message to user if status is ready"
+    )
 
 
 # --- Node 1 Output: SMART Goal ---

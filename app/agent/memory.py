@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 import json
 
@@ -27,6 +27,13 @@ class SessionState(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     last_active: datetime = Field(default_factory=datetime.now)
 
+    # SOCRATIC GATEKEEPER: State for multi-turn clarification flow
+    pending_context: Optional[Dict[str, Any]] = None
+    clarification_attempts: int = 0
+
+    # HUMAN-IN-THE-LOOP (HITL): Staging area for unconfirmed plans
+    staging_plan: Optional[ProjectPlan] = None
+
     def add_message(self, role: str, content: str | List) -> None:
         """Add a message to the history."""
         self.message_history.append(Message(role=role, content=content))
@@ -36,6 +43,24 @@ class SessionState(BaseModel):
         """Add a new plan to active plans."""
         self.active_plans.append(plan)
         self.last_active = datetime.now()
+
+    def stage_plan(self, plan: ProjectPlan) -> None:
+        """Stage a plan for user confirmation (HITL pattern)."""
+        self.staging_plan = plan
+        self.last_active = datetime.now()
+
+    def commit_staged_plan(self) -> Optional[ProjectPlan]:
+        """Commit the staged plan to active plans (HITL pattern).
+
+        Returns the committed plan, or None if no plan was staged.
+        """
+        if self.staging_plan:
+            committed = self.staging_plan
+            self.active_plans.append(committed)
+            self.staging_plan = None
+            self.last_active = datetime.now()
+            return committed
+        return None
 
     def complete_task(self, task_name: str) -> None:
         """Mark a task as completed."""

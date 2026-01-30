@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated, List, Optional, Literal
+from typing import TypedDict, Annotated, List, Optional, Literal, Dict, Any
 from langgraph.graph.message import add_messages
 
 from app.agent.schema import UserProfile, SmartGoalSchema, ProjectPlan, IntentClassification
@@ -23,10 +23,23 @@ class AgentState(TypedDict):
     # Orchestrator output
     intent: Optional[IntentClassification]
 
+    # SOCRATIC GATEKEEPER STATE
+    # Stores the draft goal and what's missing (e.g. {"draft_goal": "Run marathon", "missing_info": "fitness_level"})
+    pending_context: Optional[Dict[str, Any]]
+    # Safety counter to prevent infinite clarification loops
+    clarification_attempts: int
+    # Context tags from Refiner for Task Splitter (e.g. ["beginner", "sedentary"])
+    goal_context_tags: Optional[List[str]]
+
     # Pipeline Artifacts (The "Memory" of the chain)
     smart_goal: Optional[SmartGoalSchema]
     raw_tasks: Optional[List[str]]
     final_plan: Optional[ProjectPlan]
+
+    # HUMAN-IN-THE-LOOP (HITL) STAGING
+    # Holds the unconfirmed plan awaiting user approval
+    # Only moves to active_plans after explicit "confirm" intent
+    staging_plan: Optional[ProjectPlan]
 
     # Final response
     response: Optional[str]

@@ -45,6 +45,7 @@ const Index = () => {
   // Local state for UI only
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isConfirmingPlan, setIsConfirmingPlan] = useState(false);
 
   // Streaming chat hook
   const streaming = useStreamingChat();
@@ -125,6 +126,51 @@ const Index = () => {
       {
         id: `m${Date.now()}`,
         content: "No problem! Let's figure out a better time for this task. What's getting in the way?",
+        sender: "agent" as const,
+        timestamp: new Date(),
+      },
+    ]);
+    setIsChatOpen(true);
+  }, []);
+
+  // HITL: Handle plan confirmation
+  const handleConfirmPlan = useCallback(async () => {
+    if (!streaming.stagingPlan) return;
+
+    setIsConfirmingPlan(true);
+    try {
+      // Send "yes" to confirm the staged plan
+      await streaming.sendMessage({
+        message: "Yes, save this plan",
+        session_id: sessionIdRef.current || undefined,
+        user_id: user?.id,
+        user_profile: {
+          name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
+        },
+      });
+    } finally {
+      setIsConfirmingPlan(false);
+    }
+  }, [streaming, user?.id, user?.email, isGuest]);
+
+  // HITL: Handle plan modification request
+  const handleModifyPlan = useCallback(() => {
+    // Add a message to explain user wants to modify
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `m${Date.now()}`,
+        content: "I'd like to modify this plan...",
+        sender: "user" as const,
+        timestamp: new Date(),
+      },
+    ]);
+    // Open chat and prompt for changes
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `agent-${Date.now()}`,
+        content: "Sure! What would you like to change about this plan? You can ask me to add more tasks, adjust the schedule, or change specific tasks.",
         sender: "agent" as const,
         timestamp: new Date(),
       },
@@ -395,7 +441,16 @@ const Index = () => {
                 currentStep: streaming.currentStep,
                 completedSteps: streaming.completedSteps,
                 progress: streaming.progress,
+                // HITL state
+                stagingPlan: streaming.stagingPlan,
+                awaitingConfirmation: streaming.awaitingConfirmation,
+                // Socratic Gatekeeper state
+                clarification: streaming.clarification,
+                awaitingClarification: streaming.awaitingClarification,
               }}
+              onConfirmPlan={handleConfirmPlan}
+              onModifyPlan={handleModifyPlan}
+              isConfirmingPlan={isConfirmingPlan}
             />
           </div>
         </aside>

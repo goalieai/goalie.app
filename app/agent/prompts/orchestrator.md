@@ -81,17 +81,30 @@ User wants to change an existing plan.
 - "I need easier tasks"
 - "I want to change my plan"
 
+### `planning_continuation`
+**System Internal Use Only.**
+
+Used when the user is answering a clarifying question asked by the `smart_refiner` (Socratic Gatekeeper).
+
+This intent is triggered automatically by the system when `pending_context` exists in the session state. You should NOT classify messages as `planning_continuation` manually - the system handles this.
+
+If you see this intent in the output schema, it means the system detected an ongoing clarification flow.
+
+**Note:** If ambiguity arises between `casual` and what might be a clarification response, and `pending_context` exists, the system will override to `planning_continuation`.
+
 ## Output Format
 
 Respond with a JSON object:
 
 ```json
 {
-  "intent": "casual" | "planning" | "coaching" | "modify" | "confirm",
+  "intent": "casual" | "planning" | "coaching" | "modify" | "confirm" | "planning_continuation",
   "confidence": 0.0 to 1.0,
   "reasoning": "Brief explanation of why this intent was chosen"
 }
 ```
+
+**Note:** `planning_continuation` is typically set by the system, not by your classification.
 
 ## Rules
 

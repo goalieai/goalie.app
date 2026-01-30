@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles } from "lucide-react";
+import { Send, Sparkles, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import PipelineProgress from "@/components/PipelineProgress";
-import { PipelineStep, StreamProgress } from "@/hooks/useStreamingChat";
+import PlanPreview from "@/components/PlanPreview";
+import { PipelineStep, StreamProgress, ClarificationState } from "@/hooks/useStreamingChat";
+import { Plan } from "@/services/api";
 
 interface Message {
   id: string;
@@ -19,6 +21,12 @@ interface StreamingState {
   currentStep: PipelineStep | null;
   completedSteps: PipelineStep[];
   progress: StreamProgress;
+  // HITL: Staging plan state
+  stagingPlan?: Plan | null;
+  awaitingConfirmation?: boolean;
+  // Socratic Gatekeeper: Clarification state
+  clarification?: ClarificationState | null;
+  awaitingClarification?: boolean;
 }
 
 interface AgentChatProps {
@@ -26,9 +34,23 @@ interface AgentChatProps {
   onSendMessage: (message: string) => void;
   isTyping?: boolean;
   streamingState?: StreamingState;
+  /** Called when user confirms a staged plan */
+  onConfirmPlan?: () => void;
+  /** Called when user wants to modify a staged plan */
+  onModifyPlan?: () => void;
+  /** Whether plan confirmation is in progress */
+  isConfirmingPlan?: boolean;
 }
 
-const AgentChat = ({ messages, onSendMessage, isTyping = false, streamingState }: AgentChatProps) => {
+const AgentChat = ({
+  messages,
+  onSendMessage,
+  isTyping = false,
+  streamingState,
+  onConfirmPlan,
+  onModifyPlan,
+  isConfirmingPlan = false,
+}: AgentChatProps) => {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -147,6 +169,32 @@ const AgentChat = ({ messages, onSendMessage, isTyping = false, streamingState }
                 progress={streamingState.progress}
                 status={streamingState.status}
               />
+            </div>
+          </div>
+        )}
+
+        {/* HITL: Plan Preview with confirmation buttons */}
+        {streamingState?.awaitingConfirmation && streamingState?.stagingPlan && (
+          <div className="flex justify-start animate-fade-in">
+            <div className="w-full max-w-[95%]">
+              <PlanPreview
+                plan={streamingState.stagingPlan}
+                onConfirm={onConfirmPlan || (() => {})}
+                onModify={onModifyPlan || (() => {})}
+                isLoading={isConfirmingPlan}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Socratic Gatekeeper: Clarification indicator */}
+        {streamingState?.awaitingClarification && (
+          <div className="flex justify-start animate-fade-in">
+            <div className="agent-bubble rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-primary animate-pulse" />
+              <span className="text-sm text-muted-foreground">
+                Waiting for your answer...
+              </span>
             </div>
           </div>
         )}

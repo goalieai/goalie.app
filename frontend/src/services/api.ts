@@ -41,11 +41,17 @@ export interface Plan {
 
 export interface ChatResponse {
   session_id: string;
-  intent_detected: "casual" | "planning" | "coaching" | "modify" | "confirm" | "unknown";
+  intent_detected: "casual" | "planning" | "planning_continuation" | "coaching" | "modify" | "confirm" | "unknown";
   response: string;
   plan?: Plan;
   progress?: Progress;
   actions: Action[];
+  // HITL: Plan staging (draft plan awaiting user confirmation)
+  staging_plan?: Plan;
+  awaiting_confirmation?: boolean;
+  // Socratic Gatekeeper: Clarification state
+  awaiting_clarification?: boolean;
+  pending_context?: Record<string, unknown>;
 }
 
 export interface ChatRequest {

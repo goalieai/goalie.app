@@ -151,7 +151,7 @@ NODE_TO_STEP = {
     "confirmation": ("response", "Confirming your plan..."),
     "planning_response": ("response", "Preparing your plan..."),
     # Planning subgraph nodes
-    "smart_refiner": ("smart", "Refining SMART goal..."),
+    "smart_refiner": ("smart", "Analyzing goal context..."),
     "task_splitter": ("tasks", "Breaking into micro-tasks..."),
     "context_matcher": ("schedule", "Scheduling your tasks..."),
 }
@@ -187,7 +187,7 @@ async def chat_stream(request: UnifiedChatRequest):
             session = session_store.get_or_create(session_id, request.user_id, user_profile)
             session_store.add_message(session, "user", request.message)
 
-            # Build initial state
+            # Build initial state (including Socratic Gatekeeper and HITL fields)
             initial_state = {
                 "messages": [HumanMessage(content=request.message)],
                 "user_input": request.message,
@@ -197,6 +197,12 @@ async def chat_stream(request: UnifiedChatRequest):
                 "active_plans": session.active_plans,
                 "completed_tasks": session.completed_tasks,
                 "intent": None,
+                # Socratic Gatekeeper state (from session for multi-turn flow)
+                "pending_context": getattr(session, "pending_context", None),
+                "clarification_attempts": getattr(session, "clarification_attempts", 0),
+                "goal_context_tags": None,
+                # HITL state (from session for confirmation flow)
+                "staging_plan": getattr(session, "staging_plan", None),
                 "smart_goal": None,
                 "raw_tasks": None,
                 "final_plan": None,
@@ -225,8 +231,18 @@ async def chat_stream(request: UnifiedChatRequest):
                     step_id, _ = NODE_TO_STEP[name]
                     output = data.get("output", {})
 
-                    # Send progress preview for planning steps
-                    if name == "smart_refiner" and output.get("smart_goal"):
+                    # SOCRATIC GATEKEEPER: Detect clarification request from smart_refiner
+                    if name == "smart_refiner" and output.get("pending_context"):
+                        # Emit special "clarification" event for frontend to handle differently
+                        clarification_data = {
+                            "question": output.get("response", "Could you tell me more about your goal?"),
+                            "context": output["pending_context"],
+                            "attempts": output.get("clarification_attempts", 1)
+                        }
+                        yield format_sse("clarification", clarification_data)
+
+                    # Send progress preview for planning steps (when goal is ready)
+                    elif name == "smart_refiner" and output.get("smart_goal"):
                         smart_goal = output["smart_goal"]
                         yield format_sse("progress", {
                             "step": "smart_goal",
@@ -249,8 +265,29 @@ async def chat_stream(request: UnifiedChatRequest):
             if final_result:
                 if final_result.get("response"):
                     session_store.add_message(session, "assistant", final_result["response"])
-                if final_result.get("final_plan"):
-                    session.add_plan(final_result["final_plan"])
+
+                # SOCRATIC GATEKEEPER: Save pending context for next turn
+                if final_result.get("pending_context"):
+                    session.pending_context = final_result["pending_context"]
+                    session.clarification_attempts = final_result.get("clarification_attempts", 0)
+                else:
+                    # Clear pending context if goal was successfully processed
+                    session.pending_context = None
+                    session.clarification_attempts = 0
+
+                # HITL: Handle staging_plan and active_plans from confirmation
+                if final_result.get("staging_plan"):
+                    session.staging_plan = final_result["staging_plan"]
+                elif final_result.get("staging_plan") is None and hasattr(session, "staging_plan"):
+                    session.staging_plan = None  # Clear after confirmation
+
+                # If confirmation_node promoted staging to active
+                if final_result.get("active_plans"):
+                    for plan in final_result["active_plans"]:
+                        existing_titles = [p.project_name for p in session.active_plans]
+                        if plan.project_name not in existing_titles:
+                            session.add_plan(plan)
+
                 session_store.save(session)
 
                 # Build final response
@@ -259,13 +296,29 @@ async def chat_stream(request: UnifiedChatRequest):
                     plan = final_result["final_plan"]
                     plan_data = plan.model_dump() if hasattr(plan, 'model_dump') else plan
 
+                # HITL: Include staging_plan data
+                staging_plan_data = None
+                if final_result.get("staging_plan"):
+                    staging = final_result["staging_plan"]
+                    staging_plan_data = staging.model_dump() if hasattr(staging, 'model_dump') else staging
+
+                # Determine if we're waiting for clarification or confirmation
+                is_clarification = final_result.get("pending_context") is not None
+                is_awaiting_confirmation = staging_plan_data is not None
+
                 yield format_sse("complete", {
                     "session_id": session_id,
                     "intent_detected": final_result.get("intent").intent if final_result.get("intent") else "unknown",
                     "response": final_result.get("response", ""),
                     "plan": plan_data,
                     "progress": session.get_progress() if session.active_plans else None,
-                    "actions": final_result.get("actions", [])
+                    "actions": final_result.get("actions", []),
+                    # SOCRATIC GATEKEEPER: Include clarification state
+                    "awaiting_clarification": is_clarification,
+                    "pending_context": final_result.get("pending_context") if is_clarification else None,
+                    # HITL: Include staging state
+                    "staging_plan": staging_plan_data,
+                    "awaiting_confirmation": is_awaiting_confirmation
                 })
 
         except Exception as e:

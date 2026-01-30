@@ -26,7 +26,7 @@ def extract_text_content(content) -> str:
         return "".join(texts)
     return str(content)
 from app.agent.state import AgentState
-from app.agent.schema import SmartGoalSchema, TaskList, ProjectPlan, IntentClassification
+from app.agent.schema import SmartGoalSchema, TaskList, ProjectPlan, IntentClassification, RefinerOutput
 from app.agent.prompts import build_system_prompt, load_prompt
 from app.agent.tools.crud import ALL_TOOLS
 from app.core.supabase import supabase
@@ -216,10 +216,31 @@ def format_user_context_for_prompt(context: dict) -> str:
 
 
 async def intent_router_node(state: AgentState) -> dict:
-    """Classify user intent to route to the appropriate agent."""
+    """Classify user intent to route to the appropriate agent.
+
+    SOCRATIC GATEKEEPER: Pre-emptively checks if we're waiting for a clarification
+    response before doing standard intent classification.
+    """
     print(f"[AGENT] intent_router_node START")
     user_message = state["user_input"]
     user_id = state.get("user_id")
+
+    # PRE-EMPTIVE CHECK: Are we waiting for an answer to a clarifying question?
+    # We check attempts < 2 to prevent infinite clarification loops
+    pending_context = state.get("pending_context")
+    clarification_attempts = state.get("clarification_attempts", 0)
+
+    if pending_context and clarification_attempts < 2:
+        print(f"[AGENT] intent_router_node | SOCRATIC: Detected pending_context, routing to planning_continuation")
+        print(f"[AGENT] intent_router_node | pending_context={pending_context} | attempts={clarification_attempts}")
+        # Return a synthetic IntentClassification to route to planning_continuation
+        return {
+            "intent": IntentClassification(
+                intent="planning_continuation",
+                confidence=1.0,
+                reasoning="User is responding to a clarifying question about their goal"
+            )
+        }
 
     # Build context from database + session
     context_parts = []
@@ -366,12 +387,49 @@ async def confirmation_node(state: AgentState) -> dict:
     """
     Handle the 'confirm' intent.
 
-    Since plans are saved automatically by the orchestrator in the previous turn,
-    this node simply acknowledges the action and triggers a UI refresh.
+    HUMAN-IN-THE-LOOP (HITL): This node commits the staged plan to active_plans
+    and triggers the actual database persistence. Plans are only saved when
+    the user explicitly confirms.
     """
     print(f"[AGENT] confirmation_node START")
 
-    # Get the most recent plan from the session context
+    # HITL: Check for staged plan first (new flow)
+    staging_plan = state.get("staging_plan")
+
+    if staging_plan:
+        # HITL COMMIT: User said "Yes" and we have a draft
+        task_count = len(staging_plan.tasks)
+        project_name = staging_plan.project_name
+
+        # Convert plan tasks into create_task actions for the frontend
+        actions = [{"type": "refresh_ui", "data": {"project_name": project_name}}]
+        for task in staging_plan.tasks:
+            actions.append({
+                "type": "create_task",
+                "data": {
+                    "task_name": task.task_name,
+                    "estimated_minutes": task.estimated_minutes,
+                    "energy_required": task.energy_required,
+                    "assigned_anchor": task.assigned_anchor,
+                    "rationale": task.rationale,
+                }
+            })
+
+        response = (
+            f"Done! I've committed your **{project_name}** plan. "
+            f"All {task_count} tasks are now in your dashboard.\n\n"
+            f"Ready to tackle the first one?"
+        )
+
+        print(f"[AGENT] confirmation_node END | HITL COMMIT | plan='{project_name}' | tasks={task_count}")
+        return {
+            "response": response,
+            "active_plans": [staging_plan],  # Promote to active (will be saved to DB)
+            "staging_plan": None,  # Clear the staging buffer
+            "actions": actions,
+        }
+
+    # Legacy flow: Check for active plans (backwards compatibility)
     active_plans = state.get("active_plans", [])
     latest_plan = active_plans[-1] if active_plans else None
 
@@ -392,7 +450,7 @@ async def confirmation_node(state: AgentState) -> dict:
         }
     else:
         # Fallback if no plan exists in session
-        print(f"[AGENT] confirmation_node END | no active plan found")
+        print(f"[AGENT] confirmation_node END | no staged or active plan found")
         return {
             "response": "I'm ready to help, but I don't see a pending plan. What goal would you like to work on?",
             "actions": []
@@ -400,10 +458,19 @@ async def confirmation_node(state: AgentState) -> dict:
 
 
 async def planning_response_node(state: AgentState) -> dict:
-    """Generate a friendly response presenting the created plan."""
+    """Generate a friendly response presenting the created plan.
+
+    HUMAN-IN-THE-LOOP (HITL): This node now stages the plan for user confirmation
+    instead of committing it directly. The plan is stored in `staging_plan` and
+    only moves to `active_plans` when the user explicitly confirms.
+    """
     print(f"[AGENT] planning_response_node START")
     final_plan = state["final_plan"]
     user_name = state["user_profile"].name
+
+    # Get context tags to inform presentation style
+    context_tags = state.get("goal_context_tags", [])
+    is_beginner = "beginner" in context_tags or "sedentary" in context_tags
 
     system_prompt = build_system_prompt("system_base", "planning")
 
@@ -431,10 +498,17 @@ async def planning_response_node(state: AgentState) -> dict:
             f"- {task.assigned_anchor} ({task.estimated_minutes} min): {task.task_name}"
         )
 
+    # Include context for better presentation
+    context_info = ""
+    if context_tags:
+        context_info = f"\nUser Context Tags: {', '.join(context_tags)}"
+        if is_beginner:
+            context_info += "\n(User is a BEGINNER - explain WHY these specific tasks are the right starting point)"
+
     plan_summary = f"""Plan created:
 - Project: {final_plan.project_name}
 - Goal: {final_plan.smart_goal_summary}
-- Deadline: {final_plan.deadline}
+- Deadline: {final_plan.deadline}{context_info}
 
 Tasks:
 {chr(10).join(tasks_formatted)}"""
@@ -443,7 +517,12 @@ Tasks:
 
 {plan_summary}
 
-Present this plan to the user in a friendly, encouraging way."""
+Present this plan to the user. Remember the psychology hooks from your prompt:
+1. Explain WHY these tasks fit their level
+2. Emphasize how quick and easy the tasks are
+3. CRITICAL: End with a clear Call-to-Action asking if they want to save this plan.
+   Example: "Shall I save this plan to your profile?" or "Ready to commit to this?"
+   Do NOT imply the plan is already saved."""
 
     messages = [
         SystemMessage(content=system_prompt),
@@ -454,22 +533,14 @@ Present this plan to the user in a friendly, encouraging way."""
         llm_conversational_primary, llm_conversational_fallback, messages
     )
 
-    # Convert plan tasks into create_task actions for the frontend
-    actions = []
-    for task in final_plan.tasks:
-        actions.append({
-            "type": "create_task",
-            "data": {
-                "task_name": task.task_name,
-                "estimated_minutes": task.estimated_minutes,
-                "energy_required": task.energy_required,
-                "assigned_anchor": task.assigned_anchor,
-                "rationale": task.rationale,
-            }
-        })
-
-    print(f"[AGENT] planning_response_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
-    return {"response": extract_text_content(response.content), "actions": actions}
+    # HITL: Stage the plan for confirmation instead of creating tasks immediately
+    # The plan will only be persisted when the user confirms
+    print(f"[AGENT] planning_response_node END | response_len={len(extract_text_content(response.content))} | STAGED (awaiting confirmation)")
+    return {
+        "response": extract_text_content(response.content),
+        "staging_plan": final_plan,  # Stage for confirmation
+        # No actions yet - will be created on confirmation
+    }
 
 
 # ============================================================
@@ -477,49 +548,114 @@ Present this plan to the user in a friendly, encouraging way."""
 # ============================================================
 
 
-# --- Node 1: The Project Manager ---
+# --- Node 1: The Project Manager (with Socratic Gatekeeper) ---
 async def smart_refiner_node(state: AgentState) -> dict:
-    """Refines vague input into a strict SMART goal."""
+    """Refines vague input into a strict SMART goal.
+
+    SOCRATIC GATEKEEPER: This node now acts as both Validator and Refiner.
+    It decides whether to ask for clarification or proceed with planning.
+    """
     print(f"[AGENT] smart_refiner_node START")
-    goal_text = state["user_input"]
+    user_input = state["user_input"]
+    pending_context = state.get("pending_context", {})
+    clarification_attempts = state.get("clarification_attempts", 0)
 
-    system_prompt = """You are a pragmatic Project Manager.
-    Analyze the user's goal. If it is vague, make reasonable assumptions to make it S.M.A.R.T.
-    You MUST output a concrete deadline (e.g. 'End of this week', 'Next Friday') if none is provided.
-    Be concise and action-oriented."""
+    # Load the dual-path prompt
+    system_prompt = load_prompt("smart_refiner")
 
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=goal_text)]
-
-    result = await invoke_with_fallback(
-        llm_primary, llm_fallback, messages, structured_output=SmartGoalSchema
+    # Format the prompt with current context
+    formatted_prompt = system_prompt.replace("{user_input}", user_input)
+    formatted_prompt = formatted_prompt.replace(
+        "{pending_context}",
+        str(pending_context) if pending_context else "None"
     )
 
-    print(f"[AGENT] smart_refiner_node END | summary={result.summary[:50]}... | deadline={result.deadline}")
-    return {"smart_goal": result}
+    messages = [
+        SystemMessage(content=formatted_prompt),
+        HumanMessage(content=f"Process this goal: {user_input}")
+    ]
+
+    # Call LLM with RefinerOutput schema for dual-path response
+    result = await invoke_with_fallback(
+        llm_primary, llm_fallback, messages, structured_output=RefinerOutput
+    )
+
+    print(f"[AGENT] smart_refiner_node | status={result.status}")
+
+    if result.status == "needs_clarification":
+        # PATH A: Ask clarifying question and save context
+        print(f"[AGENT] smart_refiner_node | SOCRATIC: Asking clarification | question={result.clarifying_question[:50]}...")
+        return {
+            "response": result.clarifying_question,
+            "pending_context": result.saved_context,
+            "clarification_attempts": clarification_attempts + 1,
+            # Don't set smart_goal - we're not ready yet
+        }
+    else:
+        # PATH B: Goal is ready, proceed to task splitting
+        context_tags = result.context_tags or []
+        print(f"[AGENT] smart_refiner_node END | smart_goal={result.smart_goal[:50]}... | context_tags={context_tags}")
+
+        # Convert the string smart_goal to SmartGoalSchema for downstream nodes
+        # We create a minimal schema with the refined goal
+        smart_goal_schema = SmartGoalSchema(
+            summary=result.smart_goal,
+            specific_outcome=result.smart_goal,
+            measurable_metric="Goal completion",
+            deadline="This week",  # Default, will be refined by context
+            constraints=None
+        )
+
+        return {
+            "response": result.response_text,
+            "smart_goal": smart_goal_schema,
+            "goal_context_tags": context_tags,  # Pass tags to task_splitter
+            "pending_context": None,  # Clear context on success
+            "clarification_attempts": 0,  # Reset counter
+        }
 
 
-# --- Node 2: The Architect ---
+# --- Node 2: The Architect (with Coach Logic) ---
 async def task_splitter_node(state: AgentState) -> dict:
-    """Breaks the SMART goal into atomic micro-tasks."""
+    """Breaks the SMART goal into atomic micro-tasks.
+
+    COACH MODE: Uses context_tags to determine whether to act as a Coach
+    (providing specific curriculum for beginners) or a Secretary (providing
+    higher-level tasks for experienced users).
+    """
     print(f"[AGENT] task_splitter_node START")
     smart_goal = state["smart_goal"]
+    user = state["user_profile"]
 
-    system_prompt = """You are a Task Architect. Break projects into atomic, actionable steps.
+    # Get context tags from the Refiner (determines Coach vs Secretary mode)
+    context_tags = state.get("goal_context_tags", [])
+    context_tags_str = ", ".join(context_tags) if context_tags else "none specified"
 
-    RULES:
-    1. Create 3 to 7 tasks.
-    2. Each task must be doable in one sitting (max 20 mins).
-    3. Start each task with a verb (e.g., 'Draft', 'Email', 'Fix', 'Design').
-    4. Order tasks logically (dependencies first)."""
+    # Get user anchors for task scheduling context
+    user_anchors = ", ".join(user.anchors)
 
-    user_prompt = f"""Break this project into atomic steps:
+    print(f"[AGENT] task_splitter_node | context_tags={context_tags} | mode={'Coach' if 'beginner' in context_tags or 'sedentary' in context_tags else 'Standard'}")
 
-    Project: {smart_goal.summary}
-    Specific outcome: {smart_goal.specific_outcome}
-    Deadline: {smart_goal.deadline}"""
+    # Load the Coach prompt
+    system_prompt = load_prompt("task_splitter")
+
+    # Format the prompt with context
+    formatted_prompt = system_prompt.replace("{smart_goal}", smart_goal.summary)
+    formatted_prompt = formatted_prompt.replace("{context_tags}", context_tags_str)
+    formatted_prompt = formatted_prompt.replace("{user_anchors}", user_anchors)
+
+    user_prompt = f"""Break this goal into actionable micro-tasks:
+
+    GOAL: {smart_goal.summary}
+    CONTEXT TAGS: {context_tags_str}
+    USER ANCHORS: {user_anchors}
+    DEADLINE: {smart_goal.deadline}
+
+    Remember: If context_tags include "beginner" or "sedentary", YOU must provide the specific
+    curriculum. DO NOT assign "research" or "find a plan" tasks."""
 
     messages = [
-        SystemMessage(content=system_prompt),
+        SystemMessage(content=formatted_prompt),
         HumanMessage(content=user_prompt),
     ]
 

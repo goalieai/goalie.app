@@ -19,8 +19,14 @@ export interface StreamProgress {
   raw_tasks?: string[];
 }
 
+export interface ClarificationState {
+  question: string;
+  context: Record<string, unknown>;
+  attempts: number;
+}
+
 export interface StreamEvent {
-  type: "status" | "progress" | "complete" | "error";
+  type: "status" | "progress" | "complete" | "error" | "clarification";
   message?: string;
   data?: {
     step?: string;
@@ -32,6 +38,16 @@ export interface StreamEvent {
     plan?: Plan;
     progress?: { completed: number; total: number; percentage: number };
     actions?: Array<{ type: string; data: Record<string, unknown> }>;
+    // HITL: Staging plan
+    staging_plan?: Plan;
+    awaiting_confirmation?: boolean;
+    // Socratic Gatekeeper: Clarification
+    awaiting_clarification?: boolean;
+    pending_context?: Record<string, unknown>;
+    // Clarification event data
+    question?: string;
+    context?: Record<string, unknown>;
+    attempts?: number;
   };
 }
 
@@ -54,6 +70,16 @@ export interface UseStreamingChatReturn {
   sendMessage: (request: ChatRequest) => Promise<void>;
   /** Reset all state */
   reset: () => void;
+  // HITL: Staging plan state
+  /** Plan waiting for user confirmation */
+  stagingPlan: Plan | null;
+  /** Whether we're waiting for user to confirm a plan */
+  awaitingConfirmation: boolean;
+  // Socratic Gatekeeper: Clarification state
+  /** Clarification data when agent needs more info */
+  clarification: ClarificationState | null;
+  /** Whether we're waiting for user to answer a clarifying question */
+  awaitingClarification: boolean;
 }
 
 // Map node names to pipeline steps
@@ -139,6 +165,12 @@ export function useStreamingChat(): UseStreamingChatReturn {
   const [result, setResult] = useState<ChatResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  // HITL: Staging plan state
+  const [stagingPlan, setStagingPlan] = useState<Plan | null>(null);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  // Socratic Gatekeeper: Clarification state
+  const [clarification, setClarification] = useState<ClarificationState | null>(null);
+  const [awaitingClarification, setAwaitingClarification] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -150,6 +182,12 @@ export function useStreamingChat(): UseStreamingChatReturn {
     setResult(null);
     setError(null);
     setIsStreaming(false);
+    // HITL reset
+    setStagingPlan(null);
+    setAwaitingConfirmation(false);
+    // Socratic Gatekeeper reset
+    setClarification(null);
+    setAwaitingClarification(false);
 
     // Abort any in-flight request
     if (abortControllerRef.current) {
@@ -191,6 +229,19 @@ export function useStreamingChat(): UseStreamingChatReturn {
         }
         break;
 
+      case "clarification":
+        // Socratic Gatekeeper: Agent is asking a clarifying question
+        if (event.data) {
+          setClarification({
+            question: event.data.question || "Could you tell me more?",
+            context: event.data.context || {},
+            attempts: event.data.attempts || 1,
+          });
+          setAwaitingClarification(true);
+          setStatus("Waiting for your input...");
+        }
+        break;
+
       case "complete":
         // Mark all remaining steps as completed
         setCompletedSteps(["intent", "smart", "tasks", "schedule", "response"]);
@@ -198,6 +249,17 @@ export function useStreamingChat(): UseStreamingChatReturn {
         setStatus(null);
 
         if (event.data) {
+          // HITL: Extract staging plan state
+          if (event.data.staging_plan) {
+            setStagingPlan(event.data.staging_plan);
+            setAwaitingConfirmation(true);
+          }
+
+          // Socratic Gatekeeper: Extract clarification state
+          if (event.data.awaiting_clarification) {
+            setAwaitingClarification(true);
+          }
+
           setResult({
             session_id: event.data.session_id || "",
             intent_detected: (event.data.intent_detected as ChatResponse["intent_detected"]) || "unknown",
@@ -205,6 +267,11 @@ export function useStreamingChat(): UseStreamingChatReturn {
             plan: event.data.plan,
             progress: event.data.progress,
             actions: (event.data.actions || []) as ChatResponse["actions"],
+            // Include HITL and Socratic state
+            staging_plan: event.data.staging_plan,
+            awaiting_confirmation: event.data.awaiting_confirmation,
+            awaiting_clarification: event.data.awaiting_clarification,
+            pending_context: event.data.pending_context,
           });
         }
         break;
@@ -327,5 +394,11 @@ export function useStreamingChat(): UseStreamingChatReturn {
     isStreaming,
     sendMessage,
     reset,
+    // HITL state
+    stagingPlan,
+    awaitingConfirmation,
+    // Socratic Gatekeeper state
+    clarification,
+    awaitingClarification,
   };
 }
