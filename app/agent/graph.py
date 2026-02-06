@@ -16,6 +16,7 @@ from app.agent.nodes import (
     modify_node,
     legacy_coach_node,
 )
+from app.agent.opik_utils import trace_plan_execution
 from app.agent.memory import session_store
 
 
@@ -95,7 +96,15 @@ async def run_planning_pipeline(
         "response": None,
     }
 
-    result = await planning_graph.ainvoke(initial_state)
+    # Wrap execution with Opik tracing
+    result = await trace_plan_execution(
+        goal=goal,
+        user_profile=user_profile,
+        mode="api_plan",
+        execution_fn=planning_graph.ainvoke,
+        input=initial_state
+    )
+
     print(f"[AGENT] run_planning_pipeline END | final_plan={result.get('final_plan')}")
     return result
 
@@ -139,7 +148,15 @@ async def planning_subgraph(state: AgentState) -> dict:
     final_plan will be None.
     """
     print("[AGENT] planning_subgraph START")
-    result = await planning_graph.ainvoke(state)
+    
+    # Wrap execution with Opik tracing
+    result = await trace_plan_execution(
+        goal=state.get("user_input", ""),
+        user_profile=state.get("user_profile"),
+        mode="chat_plan",
+        execution_fn=planning_graph.ainvoke,
+        input=state
+    )
 
     # Check if we got a clarification request (Socratic Gatekeeper)
     if result.get("pending_context"):

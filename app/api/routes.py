@@ -525,13 +525,49 @@ async def update_task(task_id: str, task: schemas.TaskUpdate, user_id: str = Que
 
         update_data = {k: v for k, v in task.model_dump().items() if v is not None}
         
-        # Verify ownership ensuring user_id matches (basic check)
+        # Fetch original task to check status change
+        original = supabase.table("tasks").select("*").eq("id", task_id).eq("user_id", user_id).execute()
+        if not original.data:
+            raise HTTPException(status_code=404, detail="Task not found or unauthorized")
+        
+        original_task = original.data[0]
+        
+        # Update task
         response = supabase.table("tasks").update(update_data).eq("id", task_id).eq("user_id", user_id).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Task not found or unauthorized")
+        
+        updated_task = response.data[0]
+        
+        # --- OPIK EXECUTION TRACKING ---
+        from app.agent.execution_tracker import execution_tracker
+        from datetime import datetime as dt
+        
+        # Check if status changed to completed
+        if updated_task.get("status") == "completed" and original_task.get("status") != "completed":
+            execution_tracker.log_task_completion(
+                task_id=task_id,
+                task_name=updated_task.get("task_name", "Unnamed Task"),
+                user_id=user_id,
+                goal_id=updated_task.get("goal_id"),
+                scheduled_date=updated_task.get("scheduled_date"),
+                completed_date=dt.now().isoformat(),
+                was_rescheduled=updated_task.get("was_rescheduled", False)
+            )
+        
+        # Check if status changed to skipped/missed
+        elif updated_task.get("status") in ["skipped", "missed"] and original_task.get("status") not in ["skipped", "missed"]:
+            execution_tracker.log_task_missed(
+                task_id=task_id,
+                task_name=updated_task.get("task_name", "Unnamed Task"),
+                user_id=user_id,
+                goal_id=updated_task.get("goal_id"),
+                scheduled_date=updated_task.get("scheduled_date", "unknown"),
+                missed_date=dt.now().isoformat()
+            )
             
-        return response.data[0]
+        return updated_task
     except HTTPException:
         raise
     except Exception as e:
