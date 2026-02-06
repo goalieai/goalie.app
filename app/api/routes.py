@@ -594,6 +594,46 @@ async def delete_task(task_id: str, user_id: str = Query(..., description="User 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/tasks/{task_id}/reschedule")
+async def reschedule_task_endpoint(
+    task_id: str,
+    user_id: str = Query(..., description="User ID for authorization"),
+    reason: str = Query("user_requested", description="Reason for rescheduling")
+):
+    """
+    Reschedule a task to the next available slot.
+    
+    This is Goalie's adaptive scheduling feature - automatically finds
+    the best time to reschedule based on user's existing tasks.
+    """
+    try:
+        from app.agent.adaptive_scheduler import reschedule_task
+        
+        success = await reschedule_task(
+            task_id=task_id,
+            user_id=user_id,
+            reason=reason,
+            timezone="America/Los_Angeles"  # TODO: Get from user profile
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Task not found or could not be rescheduled")
+        
+        # Return updated task
+        if supabase:
+            response = supabase.table("tasks").select("*").eq("id", task_id).execute()
+            if response.data:
+                return response.data[0]
+        
+        return {"message": "Task rescheduled successfully", "task_id": task_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error rescheduling task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- GOALS ---
 
 @router.get("/goals", response_model=List[schemas.GoalResponse])

@@ -128,18 +128,49 @@ const Index = () => {
     }
   }, [tasks.now, completeTask]);
 
-  const handleReplanNow = useCallback(() => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `m${Date.now()}`,
-        content: "No problem! Let's figure out a better time for this task. What's getting in the way?",
-        sender: "agent" as const,
-        timestamp: new Date(),
-      },
-    ]);
-    setIsChatOpen(true);
-  }, []);
+
+  const handleReplanNow = useCallback(async () => {
+    if (!tasks.now) return;
+    
+    try {
+      // Call reschedule endpoint
+      const userId = user?.id ?? 'guest';
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/tasks/${tasks.now.id}/reschedule?user_id=${userId}&reason=user_requested`,
+        { method: 'POST' }
+      );
+      
+      if (response.ok) {
+        // Refresh tasks
+        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        
+        // Show success message
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `m${Date.now()}`,
+            content: "✨ Got it! I've rescheduled this task to a better time for you. Check your 'Next' list!",
+            sender: "agent" as const,
+            timestamp: new Date(),
+          },
+        ]);
+      } else {
+        throw new Error('Reschedule failed');
+      }
+    } catch (error) {
+      console.error('Reschedule error:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `m${Date.now()}`,
+          content: "Sorry, I couldn't reschedule that task. Want to tell me what's wrong?",
+          sender: "agent" as const,
+          timestamp: new Date(),
+        },
+      ]);
+      setIsChatOpen(true);
+    }
+  }, [tasks.now, user?.id, queryClient]);
 
   // HITL: Handle plan confirmation - saves directly to storage without agent round-trip
   const handleConfirmPlan = useCallback(async () => {

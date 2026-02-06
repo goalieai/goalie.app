@@ -719,7 +719,25 @@ async def context_matcher_node(state: AgentState) -> dict:
     result = await invoke_with_fallback(
         llm_primary, llm_fallback, messages, structured_output=ProjectPlan
     )
-
+    
+    # NEW: Assign actual timestamps to tasks based on anchors
+    from app.agent.adaptive_scheduler import anchor_to_timestamp
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    # Start scheduling from today
+    base_date = datetime.now(ZoneInfo("America/Los_Angeles"))
+    
+    # Assign scheduled_at to each task
+    for task in result.tasks:
+        scheduled_time = anchor_to_timestamp(
+            anchor=task.assigned_anchor,
+            timezone="America/Los_Angeles",
+            base_date=base_date
+        )
+        # Store as ISO string for serialization
+        task.scheduled_at = scheduled_time.isoformat()
+    
     print(f"[AGENT] context_matcher_node END | project={result.project_name} | tasks_count={len(result.tasks)}")
     return {"final_plan": result}
 

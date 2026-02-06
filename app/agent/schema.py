@@ -91,6 +91,10 @@ class MicroTask(BaseModel):
     rationale: str = Field(
         description="Why this anchor fits this task (e.g. 'High focus needs morning')"
     )
+    scheduled_at: Optional[str] = Field(
+        default=None,
+        description="ISO timestamp when task should be done (assigned by context_matcher)"
+    )
 
 
 class ProjectPlan(BaseModel):
