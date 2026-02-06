@@ -8,6 +8,13 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
     openai_api_key: str = ""
+    
+    # Email (Resend)
+    resend_api_key: str = ""
+    resend_from_email: str = "Goalie AI <onboarding@resend.dev>"  # Default Resend test email
+    
+    # Frontend URL (for email links)
+    frontend_url: str = "http://localhost:5173"
 
     # ==========================================================================
     # LLM Model Configuration

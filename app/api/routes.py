@@ -440,6 +440,49 @@ async def health():
     return {"status": "healthy"}
 
 
+# --- REMINDERS ---
+
+@router.post("/reminders/test")
+async def test_reminder(email: str = Query(..., description="Email to send test reminder to")):
+    """
+    Send a test reminder email to verify configuration.
+    
+    Use this to test your Resend setup.
+    """
+    try:
+        from app.services.reminders import test_reminder
+        
+        success = await test_reminder(email)
+        
+        if success:
+            return {"message": f"Test reminder sent to {email}", "success": True}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send test reminder")
+    
+    except Exception as e:
+        print(f"Error sending test reminder: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reminders/check")
+async def check_reminders():
+    """
+    Manually trigger the reminder checker.
+    
+    For testing purposes - in production this runs automatically.
+    """
+    try:
+        from app.services.reminders import check_and_send_reminders
+        
+        count = await check_and_send_reminders()
+        
+        return {"message": f"Checked for reminders, sent {count}", "reminders_sent": count}
+    
+    except Exception as e:
+        print(f"Error checking reminders: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================
 # CRUD ENDPOINTS
 # ============================================================

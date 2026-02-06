@@ -23,3 +23,6 @@ supabase
 
 # Streaming
 sse-starlette>=1.6.0
+
+# Email
+resend>=0.8.0
