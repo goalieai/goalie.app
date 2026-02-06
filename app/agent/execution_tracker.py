@@ -52,9 +52,8 @@ class ExecutionTracker:
             # Calculate if completed on time
             on_time = scheduled_date == completed_date if scheduled_date else True
             
-            # Create a span for this execution event
-            opik_client.track(
-                project_name="Default Project",
+            # Create a trace for this execution event
+            trace = opik_client.trace(
                 name="task_execution",
                 input={"task_id": task_id, "event": "completion"},
                 output={"status": "completed", "on_time": on_time},
@@ -65,10 +64,10 @@ class ExecutionTracker:
                     "scheduled_date": scheduled_date,
                     "completed_date": completed_date,
                     "was_rescheduled": was_rescheduled,
-                    "event_type": "completion",
-                    "metric_value": 1.0
+                    "event_type": "completion"
                 }
             )
+            trace.end()
             
             print(f"[OPIK] Logged task completion: {task_name} | on_time={on_time}")
             
@@ -89,8 +88,7 @@ class ExecutionTracker:
             return
             
         try:
-            opik_client.track(
-                project_name="Default Project",
+            trace = opik_client.trace(
                 name="task_execution",
                 input={"task_id": task_id, "event": "miss"},
                 output={"status": "missed"},
@@ -100,10 +98,10 @@ class ExecutionTracker:
                     "goal_id": goal_id,
                     "scheduled_date": scheduled_date,
                     "missed_date": missed_date,
-                    "event_type": "miss",
-                    "metric_value": 0.0
+                    "event_type": "miss"
                 }
             )
+            trace.end()
             
             print(f"[OPIK] Logged task miss: {task_name}")
             
@@ -125,8 +123,7 @@ class ExecutionTracker:
             return
             
         try:
-            opik_client.track(
-                project_name="Default Project",
+            trace = opik_client.trace(
                 name="adaptive_reschedule",
                 input={"task_id": task_id, "original_date": original_date},
                 output={"new_date": new_date, "reason": reason},
@@ -134,10 +131,10 @@ class ExecutionTracker:
                     "task_name": task_name,
                     "user_id_hash": str(abs(hash(user_id)))[:8],
                     "goal_id": goal_id,
-                    "event_type": "reschedule",
-                    "metric_value": 0.5
+                    "event_type": "reschedule"
                 }
             )
+            trace.end()
             
             print(f"[OPIK] Logged reschedule: {task_name} | {original_date} → {new_date}")
             
