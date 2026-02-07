@@ -14,7 +14,8 @@ interface AuthContextType {
     user: User | null;
     isGuest: boolean;
     isLoading: boolean;
-    signInWithMagicLink: (email: string) => Promise<{ error: AuthError | null }>;
+    signUp: (email: string, password: string) => Promise<{ error: AuthError | null }>;
+    signInWithPassword: (email: string, password: string) => Promise<{ error: AuthError | null }>;
     signOut: () => Promise<void>;
     migrateGuestData: () => Promise<void>;
 }
@@ -64,18 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    const signInWithMagicLink = useCallback(async (email: string) => {
+    const signUp = useCallback(async (email: string, password: string) => {
         if (!supabase) {
             return { error: { message: "Supabase not configured" } as AuthError };
         }
-
-        const { error } = await supabase.auth.signInWithOtp({
+        const { error } = await supabase.auth.signUp({
             email,
+            password,
             options: {
                 emailRedirectTo: window.location.origin,
             },
         });
+        return { error };
+    }, []);
 
+    const signInWithPassword = useCallback(async (email: string, password: string) => {
+        if (!supabase) {
+            return { error: { message: "Supabase not configured" } as AuthError };
+        }
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         return { error };
     }, []);
 
@@ -124,11 +132,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [user]);
 
+    // Auto-migrate guest data when a user signs in
+    useEffect(() => {
+        if (user && hasGuestData()) {
+            migrateGuestData();
+        }
+    }, [user, migrateGuestData]);
+
     const value: AuthContextType = {
         user,
         isGuest: !user,
         isLoading,
-        signInWithMagicLink,
+        signUp,
+        signInWithPassword,
         signOut,
         migrateGuestData,
     };

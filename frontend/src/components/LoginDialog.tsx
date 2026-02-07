@@ -11,40 +11,47 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mail, Loader2, CheckCircle } from "lucide-react";
+import { Mail, Lock, Loader2, LogIn, Eye, EyeOff } from "lucide-react";
 
 export default function LoginDialog() {
-    const { signInWithMagicLink, isGuest } = useAuth();
+    const { signUp, signInWithPassword, isGuest } = useAuth();
     const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
-    const [isSent, setIsSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
+    const [mode, setMode] = useState<"signin" | "signup">("signin");
+    const [showPassword, setShowPassword] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
         setIsLoading(true);
 
-        const { error } = await signInWithMagicLink(email);
+        const { error } = mode === "signup"
+            ? await signUp(email, password)
+            : await signInWithPassword(email, password);
 
         setIsLoading(false);
 
         if (error) {
             setError(error.message);
-        } else {
-            setIsSent(true);
         }
     };
 
     const handleOpenChange = (newOpen: boolean) => {
         setOpen(newOpen);
         if (!newOpen) {
-            // Reset state when closing
             setEmail("");
-            setIsSent(false);
+            setPassword("");
             setError(null);
+            setShowPassword(false);
         }
+    };
+
+    const toggleMode = () => {
+        setMode((m) => (m === "signin" ? "signup" : "signin"));
+        setError(null);
     };
 
     if (!isGuest) return null;
@@ -52,83 +59,95 @@ export default function LoginDialog() {
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
-                {/* {trigger || (
-                    <Button variant="outline" size="sm" className="gap-2">
-                        <LogIn className="w-4 h-4" />
-                        Sign In
-                    </Button>
-                )} */}
+                <Button variant="outline" size="sm" className="gap-2">
+                    <LogIn className="w-4 h-4" />
+                    Sign In
+                </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle className="text-2xl">Welcome to Goalie</DialogTitle>
+                    <DialogTitle className="text-2xl">
+                        {mode === "signin" ? "Welcome back" : "Create your account"}
+                    </DialogTitle>
                     <DialogDescription>
-                        Sign in to sync your goals and tasks across devices.
+                        {mode === "signin"
+                            ? "Sign in to sync your goals and tasks across devices."
+                            : "Sign up to save your progress and access it anywhere."}
                     </DialogDescription>
                 </DialogHeader>
 
-                {isSent ? (
-                    <div className="flex flex-col items-center gap-4 py-6">
-                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                            <CheckCircle className="w-6 h-6 text-green-600" />
+                {/* Email/Password form */}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="email">Email</Label>
+                        <div className="relative">
+                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                                id="email"
+                                type="email"
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="pl-10"
+                                required
+                                disabled={isLoading}
+                            />
                         </div>
-                        <div className="text-center">
-                            <p className="font-medium">Check your email</p>
-                            <p className="text-sm text-muted-foreground mt-1">
-                                We sent a magic link to <strong>{email}</strong>
-                            </p>
-                        </div>
-                        <Button
-                            variant="ghost"
-                            onClick={() => setIsSent(false)}
-                            className="mt-2"
-                        >
-                            Use a different email
-                        </Button>
                     </div>
-                ) : (
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="email">Email</Label>
-                            <div className="relative">
-                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input
-                                    id="email"
-                                    type="email"
-                                    placeholder="you@example.com"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="pl-10"
-                                    required
-                                    disabled={isLoading}
-                                />
-                            </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="password">Password</Label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                                id="password"
+                                type={showPassword ? "text" : "password"}
+                                placeholder={mode === "signup" ? "Create a password (min 6 chars)" : "Your password"}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="pl-10 pr-10"
+                                required
+                                minLength={6}
+                                disabled={isLoading}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                tabIndex={-1}
+                            >
+                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
                         </div>
+                    </div>
 
-                        {error && (
-                            <p className="text-sm text-destructive">{error}</p>
+                    {error && (
+                        <p className="text-sm text-destructive">{error}</p>
+                    )}
+
+                    <Button type="submit" className="w-full" disabled={isLoading || !email || !password}>
+                        {isLoading ? (
+                            <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                {mode === "signup" ? "Creating account..." : "Signing in..."}
+                            </>
+                        ) : (
+                            mode === "signup" ? "Create Account" : "Sign In"
                         )}
+                    </Button>
+                </form>
 
-                        <Button
-                            type="submit"
-                            className="w-full"
-                            disabled={isLoading || !email}
-                        >
-                            {isLoading ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                    Sending...
-                                </>
-                            ) : (
-                                "Send Magic Link"
-                            )}
-                        </Button>
-
-                        <p className="text-xs text-center text-muted-foreground">
-                            No password needed. We'll email you a secure link.
-                        </p>
-                    </form>
-                )}
+                {/* Mode toggle */}
+                <p className="text-xs text-center text-muted-foreground">
+                    {mode === "signin" ? "Don't have an account?" : "Already have an account?"}
+                    <button
+                        type="button"
+                        onClick={toggleMode}
+                        className="text-primary ml-1 hover:underline font-medium"
+                    >
+                        {mode === "signin" ? "Sign up" : "Sign in"}
+                    </button>
+                </p>
             </DialogContent>
         </Dialog>
     );
