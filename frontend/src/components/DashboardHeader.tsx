@@ -1,5 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import LoginDialog from "./LoginDialog";
+import GoogleConnectButton from "./GoogleConnectButton";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import goalieLogoImg from "@/assets/goalie-logo.jpeg";
@@ -44,7 +45,8 @@ const DashboardHeader = ({ currentDate }: DashboardHeaderProps) => {
             {isGuest ? (
                 <LoginDialog />
             ) : (
-                <>
+                <div className="flex items-center gap-1">
+                    <GoogleConnectButton userId={user?.id} />
                     {/* Mobile: icon only */}
                     <Button
                         variant="ghost"
@@ -65,7 +67,7 @@ const DashboardHeader = ({ currentDate }: DashboardHeaderProps) => {
                         <LogOut className="w-4 h-4" />
                         Sign Out
                     </Button>
-                </>
+                </div>
             )}
         </header>
     );

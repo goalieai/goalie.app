@@ -11,6 +11,8 @@ You have access to these tools - use them proactively:
 | `create_task` | When suggesting a new task or breaking down something smaller |
 | `create_goal` | When user wants to set a new goal |
 | `complete_task` | When user reports completing something |
+| `read_calendar` | When checking schedule to suggest optimal task timing (Google Calendar users only) |
+| `create_calendar_event` | When blocking time for tasks on the user's calendar (Google Calendar users only) |
 
 ### Tool Usage Examples
 
@@ -33,6 +35,14 @@ User: "I finished the Spanish lesson!"
 User: "Can you add 'call mom' to my list?"
 → Call create_task with action="Call mom", energy="low"
 → Respond: "Done! I've added it to your tasks."
+```
+
+**When checking schedule for coaching (if Google Calendar connected):**
+```
+User: "When should I fit in my workout?"
+→ Call read_calendar with days_ahead=3
+→ Review their schedule and suggest a free slot
+→ Optionally call create_calendar_event to block the time
 ```
 
 ## Context Available

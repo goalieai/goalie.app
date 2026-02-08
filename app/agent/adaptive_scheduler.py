@@ -34,6 +34,131 @@ ANCHOR_TIME_MAP = {
 }
 
 
+async def get_available_anchors(
+    user_id: str,
+    anchors: List[str],
+    days_ahead: int = 7,
+    task_duration_minutes: int = 20,
+    timezone: str = "America/Los_Angeles",
+) -> Dict[str, List[str]]:
+    """
+    Build an availability map: for each day, which anchors are free.
+
+    Checks each anchor timeslot against both:
+    - Google Calendar events (external conflicts)
+    - Existing Goally tasks (internal conflicts)
+
+    Returns:
+        {"2026-02-07": ["Morning Coffee", "End of Day"], "2026-02-08": [...], ...}
+        If no Google Calendar, all anchors are returned as available (only Goally task conflicts checked).
+    """
+    tz = ZoneInfo(timezone)
+    now = datetime.now(tz)
+    start_date = now.date()
+
+    # Fetch Google Calendar events
+    calendar_events: list[dict] = []
+    try:
+        from app.services.calendar_service import fetch_raw_calendar_events
+        calendar_events = await fetch_raw_calendar_events(user_id, days_ahead)
+    except Exception as e:
+        print(f"[SCHEDULER] Failed to fetch calendar events: {e}")
+
+    # Fetch existing Goally tasks
+    goally_tasks: list[dict] = []
+    if supabase:
+        try:
+            res = supabase.table("tasks").select("scheduled_at,estimated_minutes").eq(
+                "user_id", user_id
+            ).neq("status", "completed").execute()
+            goally_tasks = res.data or []
+        except Exception as e:
+            print(f"[SCHEDULER] Failed to fetch Goally tasks: {e}")
+
+    # Parse Goally tasks into start/end intervals
+    goally_intervals: list[dict] = []
+    for t in goally_tasks:
+        if t.get("scheduled_at"):
+            try:
+                t_start = datetime.fromisoformat(
+                    t["scheduled_at"].replace("Z", "+00:00")
+                )
+                t_end = t_start + timedelta(minutes=t.get("estimated_minutes", 15))
+                goally_intervals.append({"start": t_start, "end": t_end})
+            except (ValueError, TypeError):
+                continue
+
+    # All blocking intervals (Google + Goally)
+    all_busy = calendar_events + goally_intervals
+
+    # Build availability map
+    availability: Dict[str, List[str]] = {}
+    for day_offset in range(days_ahead):
+        current_date = start_date + timedelta(days=day_offset)
+        date_str = current_date.isoformat()
+
+        # Filter busy intervals for this day
+        days_busy = []
+        for event in all_busy:
+            event_start = event["start"]
+            # Handle timezone-aware vs naive comparison
+            if hasattr(event_start, "date"):
+                if event_start.date() == current_date:
+                    days_busy.append(event)
+
+        available_anchors = []
+        for anchor_name in anchors:
+            # Get anchor timestamp for this day
+            anchor_dt = anchor_to_timestamp(anchor_name, timezone, datetime(
+                current_date.year, current_date.month, current_date.day,
+                tzinfo=tz,
+            ))
+            anchor_end = anchor_dt + timedelta(minutes=task_duration_minutes)
+
+            # Check overlap with any busy interval
+            is_blocked = False
+            for busy in days_busy:
+                busy_start = busy["start"]
+                busy_end = busy["end"]
+                # Make timezone-aware if needed for comparison
+                if busy_start.tzinfo is None:
+                    busy_start = busy_start.replace(tzinfo=tz)
+                if busy_end.tzinfo is None:
+                    busy_end = busy_end.replace(tzinfo=tz)
+                # Standard overlap: (StartA < EndB) and (EndA > StartB)
+                if anchor_dt < busy_end and anchor_end > busy_start:
+                    is_blocked = True
+                    break
+
+            if not is_blocked:
+                available_anchors.append(anchor_name)
+
+        availability[date_str] = available_anchors
+
+    return availability
+
+
+def format_availability_for_prompt(availability: Dict[str, List[str]]) -> str:
+    """Format the availability map as a concise string for the LLM prompt."""
+    from datetime import date as date_type
+
+    lines = ["## Available Time Slots (anchors with NO calendar conflicts)"]
+    for date_str, anchors in availability.items():
+        try:
+            d = datetime.fromisoformat(date_str)
+            day_label = d.strftime("%A %b %d")
+        except ValueError:
+            day_label = date_str
+
+        if anchors:
+            slots = ", ".join(anchors)
+            lines.append(f"- **{day_label}:** {slots}")
+        else:
+            lines.append(f"- **{day_label}:** NO available slots")
+
+    return "\n".join(lines)
+
+
 def anchor_to_timestamp(
     anchor: str,
     timezone: str = "America/Los_Angeles",

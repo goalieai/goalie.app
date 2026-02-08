@@ -198,7 +198,7 @@ const Index = () => {
       // Invalidate queries to refresh UI
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
-      // Add confirmation message to chat (just for history, no agent call)
+      // Add user confirmation message to chat
       setMessages((prev) => [
         ...prev,
         {
@@ -207,13 +207,17 @@ const Index = () => {
           sender: "user" as const,
           timestamp: new Date(),
         },
-        {
-          id: `agent-${Date.now() + 1}`,
-          content: "Done! I've saved your plan. Your tasks are ready to go! 🎯",
-          sender: "agent" as const,
-          timestamp: new Date(),
-        },
       ]);
+
+      // Send confirm to agent backend (triggers Google Calendar sync)
+      streaming.sendMessage({
+        message: "confirm",
+        session_id: sessionIdRef.current || undefined,
+        user_id: user?.id,
+        user_profile: {
+          name: isGuest ? "Guest" : user?.email?.split("@")[0] || "there",
+        },
+      });
     } catch (error) {
       console.error("[Confirm] Failed to save plan:", error);
       setMessages((prev) => [
@@ -228,7 +232,7 @@ const Index = () => {
     } finally {
       setIsConfirmingPlan(false);
     }
-  }, [streaming, user?.id, queryClient]);
+  }, [streaming, user?.id, user?.email, isGuest, queryClient]);
 
   // HITL: Handle plan modification request
   // Opens chat with a helpful prompt - user types their changes naturally
@@ -327,8 +331,8 @@ const Index = () => {
         },
       ]);
 
-      // Process any actions from the agent
-      if (streaming.result.actions && streaming.result.actions.length > 0) {
+      // Process any actions from the agent (skip for confirm intent — frontend already saved tasks)
+      if (streaming.result.actions && streaming.result.actions.length > 0 && streaming.result.intent_detected !== "confirm") {
         console.log("[Agent] Processing actions:", streaming.result.actions.length);
         Promise.all(streaming.result.actions.map(processAction));
       }

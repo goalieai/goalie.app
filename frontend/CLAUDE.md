@@ -2,7 +2,7 @@
 
 ## Overview
 
-Goally's frontend is a **React 19** Single Page Application (SPA) built with **Vite 7** and **TypeScript 5.9**. It features an ADHD-friendly task dashboard with real-time AI agent integration via SSE streaming, Supabase authentication with guest fallback, and a unified storage abstraction layer.
+Goally's frontend is a **React 19** Single Page Application (SPA) built with **Vite 7** and **TypeScript 5.9**. It features an ADHD-friendly task dashboard with real-time AI agent integration via SSE streaming, Supabase authentication with guest fallback, Google Calendar integration, and a unified storage abstraction layer.
 
 ## Tech Stack
 
@@ -28,6 +28,7 @@ Goally's frontend is a **React 19** Single Page Application (SPA) built with **V
 src/
 ├── pages/
 │   ├── Index.tsx               # Main dashboard (NOW / NEXT / ACHIEVED + Agent Chat sidebar)
+│   ├── GoogleConnected.tsx     # OAuth callback landing page (success/error → redirect)
 │   └── NotFound.tsx            # 404 catch-all
 ├── components/
 │   ├── ui/                     # 49 Radix-based primitives (button, card, dialog, sheet, etc.)
@@ -37,7 +38,8 @@ src/
 │   ├── PlanPreview.tsx         # Staged plan display with Confirm/Modify buttons (HITL)
 │   ├── PipelineProgress.tsx    # Visual step indicator (Intent → Smart → Tasks → Schedule → Plan)
 │   ├── ProgressSpiral.tsx      # SVG circular progress ring
-│   ├── DashboardHeader.tsx     # Time-based greeting + auth button
+│   ├── DashboardHeader.tsx     # Time-based greeting + auth button + Google Calendar button
+│   ├── GoogleConnectButton.tsx # Connect/disconnect Google Calendar (shows email when connected)
 │   ├── AddTaskForm.tsx         # Dialog: create task (name, minutes, energy)
 │   ├── AddGoalForm.tsx         # Dialog: create goal (emoji + title)
 │   ├── LoginDialog.tsx         # Magic link auth (Supabase OTP)
@@ -50,6 +52,7 @@ src/
 │   └── AuthContext.tsx         # Supabase auth + guest mode + data migration
 ├── hooks/
 │   ├── useStreamingChat.ts     # SSE streaming, HITL staging, Socratic clarification, pipeline state
+│   ├── useGoogleCalendar.ts    # Google Calendar connection status, connect, disconnect
 │   ├── useTasks.ts             # TanStack Query CRUD: useTasks, useCreateTask, useUpdateTask, useDeleteTask, useCompleteTask
 │   ├── useGoals.ts             # TanStack Query CRUD: useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal
 │   ├── use-mobile.tsx          # useIsMobile() — true if viewport < 768px
@@ -80,7 +83,8 @@ Three sections following Miller's Law (ADHD-friendly):
 
 ```
 ┌──────────────────────────────────────┬──────────────────┐
-│  DashboardHeader (greeting + auth)   │                  │
+│  DashboardHeader (greeting + auth    │                  │
+│    + Google Calendar button)         │                  │
 ├──────────────────────────────────────┤   AgentChat      │
 │  YOUR GOALIE (NOW section)           │   (sidebar,      │
 │  - Goal emoji + title                │    fixed right,   │
@@ -156,6 +160,24 @@ switch (action.type) {
   case "refresh_ui"   → invalidate all queries
 }
 ```
+
+### Google Calendar Integration
+
+**Frontend components:**
+- `GoogleConnectButton` — In DashboardHeader, shows connected email or "Connect Calendar" button
+- `GoogleConnected` page — OAuth callback landing at `/google-connected`, auto-redirects to `/` after 2s
+- `useGoogleCalendar(userId)` hook — TanStack Query for status, connect/disconnect
+
+**Flow:**
+1. User clicks "Connect Calendar" → `useGoogleCalendar.connect()` → fetches auth URL from backend → redirects to Google consent
+2. Google redirects to `/api/google/callback` → backend stores tokens → redirects to `/google-connected?success=true`
+3. `GoogleConnected` page shows success toast → redirects to dashboard
+4. `GoogleConnectButton` now shows connected email with green checkmark
+
+**Backend interaction:**
+- `GET /api/google/status?user_id=X` — Check connection status (polled by TanStack Query)
+- `GET /api/google/auth-url?user_id=X` — Get OAuth consent URL
+- `POST /api/google/disconnect?user_id=X` — Remove tokens
 
 ### Storage Abstraction
 
@@ -244,6 +266,24 @@ task_splitter → "tasks"
 context_matcher → "schedule"
 planning_response / casual / coaching → "response"
 ```
+
+### useGoogleCalendar(userId)
+
+Google Calendar connection management.
+
+**Returns:**
+```typescript
+{
+  isConnected: boolean              // Whether user has Google tokens stored
+  accounts: GoogleAccount[]         // { id, email }[]
+  isLoading: boolean
+  connect: () => Promise<void>      // Redirects to Google OAuth consent
+  disconnect: (email?) => void      // Removes stored tokens
+  isDisconnecting: boolean
+}
+```
+
+**Query key:** `["google-calendar-status", userId]` — enabled only when userId is defined.
 
 ### useTasks() / useGoals()
 
@@ -382,7 +422,7 @@ Props: `action`, `time`, `isCurrentFocus?`, `onComplete`, `onReplan`, `completed
 
 Props: `plan: Plan`, `onConfirm`, `onModify`, `isLoading?`
 
-- Anchor emoji mapping: Morning Coffee → 🌅, After Lunch → ☀️, End of Day → 🌙
+- Anchor emoji mapping: Morning Coffee → sunrise, After Lunch → sun, End of Day → moon
 - Task list with energy level colors and time estimates
 - Max-h-64 scrollable task list
 - Save Plan (primary) + Modify (outline) buttons
@@ -394,6 +434,14 @@ Props: `currentStep`, `completedSteps`, `progress`, `status`, `compact?`
 - 5 steps: Intent → Smart Goal → Tasks → Schedule → Response
 - States: completed (green check), active (spinning loader), pending (muted icon)
 - Shows SMART goal summary card and raw tasks list as they arrive
+
+### GoogleConnectButton
+
+Props: `userId: string | undefined`
+
+- Shows nothing when no userId or loading
+- Connected: green CalendarCheck icon + email, click to disconnect
+- Disconnected: CalendarPlus icon + "Connect Calendar", click to start OAuth
 
 ### LoginDialog
 
@@ -468,6 +516,7 @@ pnpm lint         # ESLint
 - **UI state:** useState / useRef in components
 - **Auth state:** React Context (`useAuth()`)
 - **Styling:** Tailwind classes, `cn()` for conditional merging
+- **Toasts:** Sonner (`import { toast } from "sonner"`)
 - **Types:** Shared types in `types/database.ts`, API types co-located in `services/api.ts`
 - **Path alias:** `@/` maps to `./src/`
 

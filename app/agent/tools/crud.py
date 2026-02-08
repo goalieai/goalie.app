@@ -55,3 +55,6 @@ def complete_task(task_id: Optional[str] = None, task_name: Optional[str] = None
 
 # List of all available tools
 ALL_TOOLS = [create_task, create_goal, complete_task]
+
+# Alias for clarity — these are always available regardless of Google connection
+STATIC_TOOLS = ALL_TOOLS

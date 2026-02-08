@@ -11,11 +11,15 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 - **Coach vs Secretary** — Beginners get specific curriculum (Week 0 philosophy); experts get optimization tasks
 - **Human-in-the-Loop** — Plans are staged for review before saving; users can modify or confirm
 - **Anchor-Based Scheduling** — Tasks matched to daily routines (Morning Coffee, Lunch Break, End of Day) by energy level
+- **Adaptive Rescheduling** — Missed or skipped tasks automatically find the next available slot
 - **Real-Time Streaming** — SSE pipeline shows progress as the agent thinks (Intent → Smart Goal → Tasks → Schedule → Plan)
-- **AI Coach Chat** — Conversational support for motivation, setbacks, and progress review
+- **AI Coach Chat** — Conversational support for motivation, setbacks, and progress review (with tool use)
+- **Google Calendar Sync** — OAuth-based calendar integration: auto-creates events on plan confirmation, reads calendar for context and conflict avoidance
+- **Email Reminders** — Task reminders via Resend when tasks are due
 - **ADHD-Friendly Dashboard** — Three sections (NOW / NEXT / ACHIEVED), large touch targets, medal celebrations
 - **Guest & Auth Modes** — Use instantly without signup (localStorage), or sign in for Supabase persistence
 - **Progress Visualization** — Circular spiral tracker with completion metrics
+- **LLM Observability** — Full tracing and online LLM-judge evaluation via Comet Opik
 
 ## Tech Stack
 
@@ -29,6 +33,8 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 | **LLM (Fallback)** | Ollama (`llama3.2:1b` local) |
 | **Database & Auth** | Supabase (PostgreSQL + Auth + RLS) |
 | **Streaming** | SSE via sse-starlette |
+| **Google Integration** | Google Calendar API (OAuth 2.0) |
+| **Email** | Resend |
 | **Observability** | Comet Opik |
 | **Frontend Hosting** | Vercel |
 | **Backend Hosting** | Heroku (Procfile) / Google Cloud Run (CI/CD) |
@@ -41,6 +47,7 @@ Built for the [Comet Resolution V2 Hackathon](https://www.encodeclub.com/program
 - Python 3.11+
 - Google Gemini API key
 - Supabase project (optional — guest mode works without it)
+- Google Cloud project with Calendar API enabled (optional — for calendar sync)
 - Comet Opik account (optional)
 
 ### Backend
@@ -58,7 +65,14 @@ Create `.env` at project root:
 GOOGLE_API_KEY=your_gemini_api_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_service_key
-OPIK_API_KEY=your_opik_api_key          # optional
+OPIK_API_KEY=your_opik_api_key                # optional
+RESEND_API_KEY=your_resend_api_key             # optional
+
+# Google Calendar OAuth (optional)
+GOOGLE_OAUTH_CLIENT_ID=your_client_id
+GOOGLE_OAUTH_CLIENT_SECRET=your_client_secret
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8000/api/google/callback
+FRONTEND_ORIGIN=http://localhost:5173
 ```
 
 ### Frontend
@@ -76,6 +90,14 @@ VITE_SUPABASE_URL=your_supabase_url         # optional — guest mode if missing
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key  # optional — guest mode if missing
 ```
 
+### Google Calendar Setup
+
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable the **Google Calendar API**
+3. Create OAuth 2.0 credentials (Web application)
+4. Add `http://localhost:8000/api/google/callback` as an authorized redirect URI
+5. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and `FRONTEND_ORIGIN` in your `.env`
+
 ## Architecture
 
 ### Project Structure
@@ -86,7 +108,8 @@ goalie.app/
 │   ├── main.py                     # App entry: CORS, Opik, routes
 │   ├── api/
 │   │   ├── routes.py               # REST + SSE streaming endpoints
-│   │   └── schemas.py              # API request/response models
+│   │   ├── schemas.py              # API request/response models
+│   │   └── google_routes.py        # Google OAuth flow endpoints
 │   ├── agent/
 │   │   ├── graph.py                # Orchestrator + Planning subgraph (LangGraph)
 │   │   ├── nodes.py                # All node implementations + LLM helpers
@@ -94,17 +117,25 @@ goalie.app/
 │   │   ├── schema.py               # Domain models (Intent, SmartGoal, Plan, etc.)
 │   │   ├── prompts.py              # Prompt template loader
 │   │   ├── memory.py               # Session stores (Memory, Supabase, Hybrid)
+│   │   ├── adaptive_scheduler.py   # Anchor-to-timestamp + rescheduling
+│   │   ├── execution_tracker.py    # Task completion/miss tracking
+│   │   ├── opik_utils.py           # Opik tracing + LLM-judge evaluation
 │   │   ├── prompts/                # 8 markdown prompt templates
-│   │   └── tools/                  # LangChain tools (create_task, create_goal, complete_task)
+│   │   └── tools/
+│   │       ├── crud.py             # LangChain tools (create_task, create_goal, complete_task)
+│   │       └── descriptions/       # Tool description markdown files
+│   ├── services/
+│   │   ├── calendar_service.py     # Google Calendar API wrapper
+│   │   └── reminders.py            # Email reminders via Resend
 │   └── core/
-│       ├── config.py               # Settings (env vars, LLM config, rate limits)
+│       ├── config.py               # Settings (env vars, LLM config, Google OAuth)
 │       └── supabase.py             # Supabase client init
 ├── frontend/                       # React 19 SPA
 │   └── src/
-│       ├── pages/                  # Index (dashboard), NotFound
-│       ├── components/             # 15 business components + 49 Radix UI primitives
+│       ├── pages/                  # Index (dashboard), GoogleConnected, NotFound
+│       ├── components/             # 17 business components + 49 Radix UI primitives
 │       ├── contexts/               # AuthContext (magic link + guest mode)
-│       ├── hooks/                  # useStreamingChat, useTasks, useGoals
+│       ├── hooks/                  # useStreamingChat, useGoogleCalendar, useTasks, useGoals
 │       ├── services/               # API client + unified store factory
 │       ├── lib/                    # utils (cn), Supabase client
 │       └── types/                  # TypeScript interfaces
@@ -126,9 +157,9 @@ User Message
   ▼
 Intent Router ─── classifies intent ───┐
   │                                     │
-  ├─→ casual ─────────────────────────→ Response
-  ├─→ coaching ───────────────────────→ Response + Actions
-  ├─→ confirm (HITL) ────────────────→ Commit staged plan → Actions
+  ├─→ casual ─────────────────────────→ Response + Tool Actions
+  ├─→ coaching ───────────────────────→ Response + Tool Actions
+  ├─→ confirm (HITL) ────────────────→ Commit staged plan → Task Actions + Calendar Sync
   ├─→ modify ─────────────────────────→ Update staging plan
   └─→ planning ──→ Planning Pipeline
                         │
@@ -143,7 +174,7 @@ Intent Router ─── classifies intent ───┐
               Ask user    Task Splitter (Coach vs Secretary)
               (save ctx)      │
                               ▼
-                         Context Matcher (energy → anchors)
+                         Context Matcher (energy → anchors + calendar conflict check)
                               │
                               ▼
                          Planning Response (HITL: stage plan, ask confirmation)
@@ -165,15 +196,18 @@ Intent Router ─── classifies intent ───┐
 
 **LLM Fallback** — Primary model (`gemini-3-flash-preview`, temp=0.0) with automatic fallback to Ollama (`llama3.2:1b`) on rate limits (HTTP 429) or parse errors. Conversational calls use temp=0.7.
 
+**Google Calendar Integration** — Three integration points: (1) calendar context injected into agent prompts for awareness, (2) conflict avoidance during task scheduling, (3) auto-creation of calendar events on plan confirmation.
+
 ### Database Schema (Supabase)
 
 | Table | Purpose |
 |-------|---------|
 | `profiles` | User preferences, daily anchors, display name |
 | `goals` | Goals with emoji, status (active/achieved/archived), target date |
-| `tasks` | Micro-tasks with time estimates, energy level, assigned anchor, rationale |
+| `tasks` | Micro-tasks with time estimates, energy level, assigned anchor, scheduled_at, rationale |
 | `sessions` | Conversation sessions with last_active tracking |
 | `messages` | Chat history with role, content, metadata (tokens, model, tool_calls) |
+| `google_tokens` | Google OAuth tokens (access_token, refresh_token, google_email, scopes, expiry) |
 
 All tables use `user_id` for Row-Level Security (RLS).
 
@@ -194,16 +228,34 @@ All tables use `user_id` for Row-Level Security (RLS).
 |--------|----------|-------------|
 | GET/POST | `/api/tasks` | List / create tasks |
 | PUT/DELETE | `/api/tasks/{id}` | Update / delete task |
+| POST | `/api/tasks/{id}/reschedule` | Adaptive task rescheduling |
 | GET/POST | `/api/goals` | List / create goals |
 | PUT/DELETE | `/api/goals/{id}` | Update / delete goal |
 | GET/PUT | `/api/profile/{user_id}` | Get / update user profile |
 | GET | `/api/health` | Health check |
 
+### Google Calendar
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/google/auth-url` | Generate OAuth consent URL |
+| GET | `/api/google/callback` | OAuth callback (token exchange + storage) |
+| GET | `/api/google/status` | Check connection status |
+| POST | `/api/google/disconnect` | Remove stored tokens |
+
+### Reminders
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/reminders/test` | Send test reminder email |
+| POST | `/api/reminders/check` | Manually trigger reminder check |
+
 ## Frontend Dashboard
 
 ```
 ┌──────────────────────────────────────┬──────────────────┐
-│  DashboardHeader (greeting + auth)   │                  │
+│  DashboardHeader (greeting + auth    │                  │
+│    + Google Calendar)                │                  │
 ├──────────────────────────────────────┤   AgentChat      │
 │  YOUR GOALIE (NOW)                   │   (sidebar)      │
 │  - Current goal + task               │                  │
@@ -242,7 +294,13 @@ Auto-deploys on push to `main`. SPA routing configured via `vercel.json`. Set `V
 
 ## Observability
 
-This project uses [Comet Opik](https://www.comet.com/site/products/opik/) for LLM observability. All LangGraph operations are automatically traced when `OPIK_API_KEY` is configured, allowing you to debug agent reasoning, tool usage, and latency. Initialization is optional and gracefully skipped if unconfigured.
+This project uses [Comet Opik](https://www.comet.com/site/products/opik/) for LLM observability:
+
+- **Plan tracing** — All LangGraph planning operations are traced with input/output logging
+- **Online evaluation** — LLM-judge scores plans on Constraint Adherence, Feasibility, and Task Coverage
+- **Execution tracking** — Task completions and misses are logged for behavioral analytics
+
+Initialization is optional and gracefully skipped if `OPIK_API_KEY` is unconfigured.
 
 ## License
 

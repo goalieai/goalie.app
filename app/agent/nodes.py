@@ -1,4 +1,4 @@
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
@@ -28,7 +28,8 @@ def extract_text_content(content) -> str:
 from app.agent.state import AgentState
 from app.agent.schema import SmartGoalSchema, TaskList, ProjectPlan, IntentClassification, RefinerOutput
 from app.agent.prompts import build_system_prompt, load_prompt
-from app.agent.tools.crud import ALL_TOOLS
+from app.agent.tools.crud import ALL_TOOLS, STATIC_TOOLS
+from app.agent.tools.google_tools import create_google_tools
 from app.core.supabase import supabase
 
 
@@ -88,6 +89,102 @@ llm_conversational_fallback = create_llm(
     settings.llm_conversational_temperature,
     settings.llm_fallback_max_retries,
 ).bind_tools(ALL_TOOLS)
+
+
+def get_conversational_llms(user_id: str = None):
+    """Get conversational LLMs with appropriate tools bound.
+
+    If user has Google connected, binds static + Google tools.
+    Otherwise returns the module-level defaults (static tools only).
+    """
+    if not user_id:
+        return llm_conversational_primary, llm_conversational_fallback
+
+    google_tools = create_google_tools(user_id)
+    if not google_tools:
+        return llm_conversational_primary, llm_conversational_fallback
+
+    # User has Google connected — create new LLM instances with all tools
+    all_tools = STATIC_TOOLS + google_tools
+    primary = create_llm(
+        settings.llm_primary_model,
+        settings.llm_conversational_temperature,
+        settings.llm_primary_max_retries,
+    ).bind_tools(all_tools)
+    fallback = create_llm(
+        settings.llm_fallback_model,
+        settings.llm_conversational_temperature,
+        settings.llm_fallback_max_retries,
+    ).bind_tools(all_tools)
+
+    return primary, fallback
+
+
+# Google tool names that execute server-side (not frontend actions)
+GOOGLE_TOOL_NAMES = {"read_calendar", "create_calendar_event"}
+
+
+async def execute_google_tools_and_refine(response, messages, conv_primary, conv_fallback, user_id: str):
+    """Handle tool calls: execute Google tools server-side, collect static tool actions.
+
+    Two-pass pattern:
+    1. Separate Google tool calls from static (frontend action) tool calls
+    2. Execute Google tools server-side
+    3. If any Google tools were called, do a second LLM call with ToolMessages
+    4. Return (response_text, frontend_actions)
+    """
+    if not hasattr(response, "tool_calls") or not response.tool_calls:
+        return extract_text_content(response.content), []
+
+    google_calls = []
+    static_calls = []
+    for call in response.tool_calls:
+        if call["name"] in GOOGLE_TOOL_NAMES:
+            google_calls.append(call)
+        else:
+            static_calls.append(call)
+
+    # Frontend actions from static tools
+    frontend_actions = [
+        {"type": call["name"], "data": call["args"]}
+        for call in static_calls
+    ]
+
+    # If no Google tools were called, return immediately
+    if not google_calls:
+        return extract_text_content(response.content), frontend_actions
+
+    # Execute Google tools server-side
+    google_tools = create_google_tools(user_id)
+    tool_map = {t.name: t for t in google_tools}
+
+    tool_messages = []
+    for call in google_calls:
+        tool = tool_map.get(call["name"])
+        if tool:
+            try:
+                result = tool.invoke(call["args"])
+                print(f"[AGENT] Google tool '{call['name']}' result: {str(result)[:100]}...")
+            except Exception as e:
+                result = f"Error: {e}"
+                print(f"[AGENT] Google tool '{call['name']}' error: {e}")
+            tool_messages.append(
+                ToolMessage(content=str(result), tool_call_id=call["id"])
+            )
+
+    # Second LLM call: feed tool results back for a natural response
+    refined_messages = messages + [response] + tool_messages
+    refined_response = await invoke_with_fallback(
+        conv_primary, conv_fallback, refined_messages
+    )
+
+    # Check for any additional tool calls in the refined response
+    if hasattr(refined_response, "tool_calls") and refined_response.tool_calls:
+        for call in refined_response.tool_calls:
+            if call["name"] not in GOOGLE_TOOL_NAMES:
+                frontend_actions.append({"type": call["name"], "data": call["args"]})
+
+    return extract_text_content(refined_response.content), frontend_actions
 
 
 async def invoke_with_fallback(llm_primary, llm_fallback, messages, structured_output=None):
@@ -160,14 +257,23 @@ async def get_user_context(user_id: str) -> dict:
         active_tasks = [t for t in tasks if t.get("status") != "completed"]
         completed_tasks = [t for t in tasks if t.get("status") == "completed"]
 
+        # Fetch Google Calendar context
+        calendar_context = ""
+        try:
+            from app.services.calendar_service import get_calendar_context
+            calendar_context = await get_calendar_context(user_id)
+        except Exception as e:
+            print(f"[DEBUG] Error fetching calendar context: {e}")
+
         return {
             "active_tasks": active_tasks,
             "completed_tasks": completed_tasks,
             "goals": goals,
+            "calendar_context": calendar_context,
         }
     except Exception as e:
         print(f"[DEBUG] Error fetching user context: {e}")
-        return {"active_tasks": [], "completed_tasks": [], "goals": []}
+        return {"active_tasks": [], "completed_tasks": [], "goals": [], "calendar_context": ""}
 
 
 def format_user_context_for_prompt(context: dict) -> str:
@@ -206,6 +312,11 @@ def format_user_context_for_prompt(context: dict) -> str:
         parts.append(f"Goals ({len(goals)}):\n" + "\n".join(goal_lines))
     else:
         parts.append("Goals: None set yet")
+
+    # Google Calendar context
+    calendar = context.get("calendar_context", "")
+    if calendar:
+        parts.append(calendar)
 
     return "\n\n".join(parts)
 
@@ -312,25 +423,23 @@ async def casual_node(state: AgentState) -> dict:
     user_context = f"User's name: {user_name}\n\n{context_str}"
     full_system = f"{system_prompt}\n\n## Current User\n{user_context}"
 
+    # Get per-user LLMs (with Google tools if connected)
+    conv_primary, conv_fallback = get_conversational_llms(user_id)
+
     messages = [
         SystemMessage(content=full_system),
         HumanMessage(content=user_message),
     ]
 
-    response = await invoke_with_fallback(
-        llm_conversational_primary, llm_conversational_fallback, messages
+    response = await invoke_with_fallback(conv_primary, conv_fallback, messages)
+
+    # Handle tool calls: Google tools execute server-side, static tools become frontend actions
+    response_text, actions = await execute_google_tools_and_refine(
+        response, messages, conv_primary, conv_fallback, user_id
     )
 
-    # Extract tool calls (actions)
-    actions = []
-    if hasattr(response, "tool_calls") and response.tool_calls:
-        actions = [
-            {"type": call["name"], "data": call["args"]}
-            for call in response.tool_calls
-        ]
-
-    print(f"[AGENT] casual_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
-    return {"response": extract_text_content(response.content), "actions": actions}
+    print(f"[AGENT] casual_node END | response_len={len(response_text)} | actions={len(actions)}")
+    return {"response": response_text, "actions": actions}
 
 
 async def coaching_node(state: AgentState) -> dict:
@@ -370,25 +479,23 @@ async def coaching_node(state: AgentState) -> dict:
 
     full_system = f"{system_prompt}\n\n## User Context\n{''.join(progress_parts)}"
 
+    # Get per-user LLMs (with Google tools if connected)
+    conv_primary, conv_fallback = get_conversational_llms(user_id)
+
     messages = [
         SystemMessage(content=full_system),
         HumanMessage(content=user_message),
     ]
 
-    response = await invoke_with_fallback(
-        llm_conversational_primary, llm_conversational_fallback, messages
+    response = await invoke_with_fallback(conv_primary, conv_fallback, messages)
+
+    # Handle tool calls: Google tools execute server-side, static tools become frontend actions
+    response_text, actions = await execute_google_tools_and_refine(
+        response, messages, conv_primary, conv_fallback, user_id
     )
 
-    # Extract tool calls (actions)
-    actions = []
-    if hasattr(response, "tool_calls") and response.tool_calls:
-        actions = [
-            {"type": call["name"], "data": call["args"]}
-            for call in response.tool_calls
-        ]
-
-    print(f"[AGENT] coaching_node END | response_len={len(extract_text_content(response.content))} | actions={len(actions)}")
-    return {"response": extract_text_content(response.content), "actions": actions}
+    print(f"[AGENT] coaching_node END | response_len={len(response_text)} | actions={len(actions)}")
+    return {"response": response_text, "actions": actions}
 
 
 async def confirmation_node(state: AgentState) -> dict:
@@ -423,9 +530,24 @@ async def confirmation_node(state: AgentState) -> dict:
                 }
             })
 
+        # Auto-add tasks to Google Calendar if user has it connected
+        user_id = state.get("user_id")
+        calendar_results = []
+        if user_id:
+            try:
+                from app.services.calendar_service import create_calendar_events_for_plan
+                calendar_results = await create_calendar_events_for_plan(user_id, staging_plan)
+            except Exception as e:
+                print(f"[AGENT] confirmation_node | Calendar sync failed: {e}")
+
+        calendar_msg = ""
+        if calendar_results:
+            calendar_msg = f"\n\nI've also added all {len(calendar_results)} tasks to your **Google Calendar** with reminders."
+
         response = (
             f"Done! I've committed your **{project_name}** plan. "
-            f"All {task_count} tasks are now in your dashboard.\n\n"
+            f"All {task_count} tasks are now in your dashboard."
+            f"{calendar_msg}\n\n"
             f"Ready to tackle the first one?"
         )
 
@@ -677,25 +799,57 @@ async def task_splitter_node(state: AgentState) -> dict:
 
 # --- Node 3: The Tiny Habits Coach ---
 async def context_matcher_node(state: AgentState) -> dict:
-    """Matches tasks to user anchors based on energy levels."""
+    """Matches tasks to user anchors based on energy levels.
+
+    Uses deterministic anchor availability checking (Python) to enforce
+    calendar conflicts, then lets the LLM decide which available slot
+    best fits each task based on energy/psychology.
+    """
     print(f"[AGENT] context_matcher_node START")
     tasks = state["raw_tasks"]
     smart_goal = state["smart_goal"]
     user = state["user_profile"]
+    user_id = state.get("user_id")
 
     tasks_formatted = "\n".join(f"- {task}" for task in tasks)
-    anchors_formatted = ", ".join(user.anchors)
+
+    # Compute anchor availability (checks Google Calendar + Goally tasks)
+    from app.agent.adaptive_scheduler import (
+        get_available_anchors,
+        format_availability_for_prompt,
+        anchor_to_timestamp,
+    )
+
+    availability_section = ""
+    if user_id:
+        try:
+            availability = await get_available_anchors(
+                user_id=user_id,
+                anchors=user.anchors,
+                days_ahead=7,
+                task_duration_minutes=20,
+            )
+            availability_section = format_availability_for_prompt(availability)
+            print(f"[AGENT] context_matcher_node | availability computed for {len(availability)} days")
+        except Exception as e:
+            print(f"[AGENT] context_matcher_node | availability check failed: {e}")
+
+    # Fallback: if no availability data, list all anchors as available
+    if not availability_section:
+        anchors_formatted = ", ".join(user.anchors)
+        availability_section = f"All anchors available: {anchors_formatted}"
 
     system_prompt = """You are a Behavioral Scientist using the Tiny Habits method.
 
     INSTRUCTIONS:
     1. Assess each task's cognitive load (high/medium/low).
-    2. Assign each task to the BEST available User Anchor:
+    2. Assign each task to one of the AVAILABLE anchors listed below.
        - High Focus tasks -> Morning anchors (fresh energy)
        - Medium Focus tasks -> Mid-day anchors
        - Low Focus/Admin tasks -> End of day anchors
-    3. Estimate realistic time (5-20 minutes each).
-    4. Provide a brief rationale for each assignment."""
+    3. You MUST ONLY use anchors marked as available. Never pick a blocked slot.
+    4. Estimate realistic time (5-20 minutes each).
+    5. Provide a brief rationale for each assignment."""
 
     user_prompt = f"""Schedule these tasks for the user:
 
@@ -704,7 +858,8 @@ async def context_matcher_node(state: AgentState) -> dict:
 
     USER PROFILE:
     - Role: {user.role}
-    - Available Anchors: {anchors_formatted}
+
+    {availability_section}
 
     TASKS TO SCHEDULE:
 {tasks_formatted}
@@ -719,25 +874,21 @@ async def context_matcher_node(state: AgentState) -> dict:
     result = await invoke_with_fallback(
         llm_primary, llm_fallback, messages, structured_output=ProjectPlan
     )
-    
-    # NEW: Assign actual timestamps to tasks based on anchors
-    from app.agent.adaptive_scheduler import anchor_to_timestamp
+
+    # Assign actual timestamps to tasks based on their assigned anchors
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    
-    # Start scheduling from today
+
     base_date = datetime.now(ZoneInfo("America/Los_Angeles"))
-    
-    # Assign scheduled_at to each task
+
     for task in result.tasks:
         scheduled_time = anchor_to_timestamp(
             anchor=task.assigned_anchor,
             timezone="America/Los_Angeles",
-            base_date=base_date
+            base_date=base_date,
         )
-        # Store as ISO string for serialization
         task.scheduled_at = scheduled_time.isoformat()
-    
+
     print(f"[AGENT] context_matcher_node END | project={result.project_name} | tasks_count={len(result.tasks)}")
     return {"final_plan": result}
 

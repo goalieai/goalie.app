@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.routes import router
+from app.api.google_routes import google_router
 from app.core.config import settings
 
 # Initialize Opik for observability (optional)
@@ -91,6 +92,7 @@ app.add_middleware(PreflightCORSMiddleware)
 
 # Include API routes
 app.include_router(router, prefix="/api")
+app.include_router(google_router, prefix="/api/google")
 
 
 @app.get("/")
